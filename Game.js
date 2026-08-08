@@ -48,9 +48,26 @@ class Game extends EventEmitter {
       console.error(`(${this.port}): ${data.toString().trim()}`);
     });
 
+    // Without this, a failed spawn (missing hemlock binary, bad cwd, or the
+    // OS refusing to fork under load) emits an unhandled 'error' on the
+    // child process, which Node treats as an uncaught exception and crashes
+    // the *entire* GameRouter -- taking down every other game and the API
+    // for all players, not just this one request.
+    this._exited = false;
+    this.process.on('error', (err) => {
+      console.error(`(${this.port}): failed to start game server: ${err.message}`);
+      if (!this._exited) {
+        this._exited = true;
+        this.emit('exit', this.port);
+      }
+    });
+
     this.process.on('exit', (code, signal) => {
-      this.emit('exit', this.port);
       console.log(`(${this.port}): exited with code ${code} signal ${signal}`);
+      if (!this._exited) {
+        this._exited = true;
+        this.emit('exit', this.port);
+      }
     });
   }
 

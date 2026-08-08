@@ -6,6 +6,18 @@ const app = express();
 const { version, port, nginx } = require('./config.json');
 let { collectMetadata } = require('./config.json');
 
+// In nginx mode, all requests arrive via the local reverse proxy, so trust
+// its X-Forwarded-For header to recover the real client IP -- otherwise
+// req.ip resolves to the proxy's own address for every request, collapsing
+// rate limiting and the per-IP PoW challenge map onto a single shared
+// bucket. Only trust the loopback hop (not an arbitrary chain), since
+// nginx is expected to run on the same host per the documented setup.
+// Outside nginx mode, leave Express's default (don't trust proxy headers
+// at all) so a client can't spoof its IP via X-Forwarded-For directly.
+if (nginx) {
+  app.set('trust proxy', 'loopback');
+}
+
 const accessKey = process.env.ACCESS_KEY;
 const discordHook = process.env.DISCORD_WEBHOOK;
 
@@ -43,6 +55,36 @@ app.use(bodyParser.urlencoded({
 const challenges = {};
 // Map of port number -> raifu wars game server
 const games = {};
+// All games from spawn to exit, including ones still starting up and not
+// yet in `games` (which only gets a port-keyed entry once the child
+// process reports its port). Used for the per-IP cap below so a burst of
+// requests can't all pass the check before any of them has a port yet.
+const allGames = [];
+
+// Max concurrent games a single IP may host. Without this, one actor can
+// keep hosting games until the whole server hits its memory-based capacity
+// limit below, denying service to everyone else.
+const MAX_GAMES_PER_IP = 3;
+
+// How long a fetched challenge stays valid before it must be re-requested.
+// Also bounds how long an unused challenge lingers in memory.
+const CHALLENGE_TTL_MS = 60000;
+
+// Periodically clear out challenges nobody redeemed, so an attacker can't
+// grow `challenges` unboundedly by hitting /challenge from many distinct
+// source IPs and never following up with /games.
+setInterval(() => {
+  const now = Date.now();
+  for (const ip of Object.keys(challenges)) {
+    if (challenges[ip] && challenges[ip].expires <= now) {
+      delete challenges[ip];
+    }
+  }
+}, CHALLENGE_TTL_MS).unref();
+
+function countGamesForIp(ip) {
+  return allGames.filter((g) => g.ip === ip).length;
+}
 
 app.get('/version', (req, res) => {
   res.status(200).send(version);
@@ -64,7 +106,7 @@ app.get('/games', (req, res) => {
 app.post('/challenge', (req, res) => {
   const challenge = generateChallenge();
   const ip = req.ip;
-  challenges[ip] = challenge;
+  challenges[ip] = { value: challenge, expires: Date.now() + CHALLENGE_TTL_MS };
   res.send(challenge);
 });
 
@@ -79,8 +121,9 @@ app.post('/games', (req, res) => {
   // Check the user's proof of work before hosting new game
   const pow = req.body.pow;
   if (pow) {
-    const challenge = challenges[req.ip];
-    challenges[req.ip] = undefined;
+    const stored = challenges[req.ip];
+    const challenge = stored && stored.expires > Date.now() ? stored.value : undefined;
+    delete challenges[req.ip];
     const challengeConstant = accessKey + version;
     if (!testSolution(challengeConstant, challenge, pow)) {
       res.status(401);
@@ -95,7 +138,14 @@ app.post('/games', (req, res) => {
     return;
   }
 
-  const numGames = Object.keys(games).length;
+  if (countGamesForIp(req.ip) >= MAX_GAMES_PER_IP) {
+    res.status(429);
+    res.send('You already have the maximum number of games running.');
+    console.error(req.ip + ' rejected. Already at per-IP game limit.');
+    return;
+  }
+
+  const numGames = allGames.length;
   const maxGames = Math.floor(os.totalmem() / 50000000) - 5;
   if (numGames >= maxGames) {
     res.status(503);
@@ -110,7 +160,14 @@ app.post('/games', (req, res) => {
   const host = req.body.host;// : 'Unknown';
   const name = req.body.name;// : 'Raifu Wars Match';
   const newGame = new Game(name, host, req.ip);
+  allGames.push(newGame);
+  // The HTTP response is normally sent from the 'port' handler below. If the
+  // game process exits before ever reporting a port (e.g. it crashed, or
+  // picked an already-bound port), nothing would otherwise respond to this
+  // request at all -- the caller's connection would just hang forever.
+  let responded = false;
   newGame.on('port', (port) => {
+    responded = true;
     games[port] = newGame;
     const connectInfo = nginx ? `/game/${port}` : port.toString();
     res.status(200).send(connectInfo);
@@ -148,6 +205,12 @@ app.post('/games', (req, res) => {
   });
   newGame.on('exit', (port) => {
     if (port !== '?') delete games[port];
+    const idx = allGames.indexOf(newGame);
+    if (idx !== -1) allGames.splice(idx, 1);
+    if (!responded) {
+      responded = true;
+      res.status(502).send('Game server failed to start.');
+    }
     // get game length in seconds
     const gameLength = Math.floor((Date.now() - newGame.timestamp) / 1000);
     // update session in database
