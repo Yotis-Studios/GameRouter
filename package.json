@@ -1,0 +1,26 @@
+{
+  "name": "gamerouter",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Yotis Studios",
+  "license": "MIT",
+  "dependencies": {
+    "body-parser": "^1.19.0",
+    "discord-webhook-node": "^1.1.8",
+    "express": "^4.17.1",
+    "express-rate-limit": "^5.0.0",
+    "md5": "^2.2.1",
+    "random": "^2.1.1",
+    "sqlite3": "^5.1.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.23.1",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.26.0"
+  }
+}

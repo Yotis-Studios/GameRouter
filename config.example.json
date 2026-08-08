@@ -1,0 +1,6 @@
+{
+    "version": "v1.13.2",
+    "port": 42069,
+    "collectMetadata": true,
+    "nginx": false
+}
