@@ -39,6 +39,7 @@ const accessKey = process.env.ACCESS_KEY;
 const discordHook = process.env.DISCORD_WEBHOOK;
 
 const { generateChallenge, testSolution } = require('./challenge.js');
+const { generateCode, normalise: normaliseCode } = require('./code.js');
 const Game = require('./Game');
 
 const sqlite3 = require('sqlite3');
@@ -72,6 +73,12 @@ app.use(bodyParser.urlencoded({
 const challenges = {};
 // Map of port number -> raifu wars game server
 const games = {};
+// Map of join code -> raifu wars game server. Separate from `games` rather than a field scan,
+// because a lookup by code is the whole point and scanning would make it O(games) per request
+// on an endpoint anybody can call. Entries are added when a game is created and removed when
+// it exits, so a code is never reachable after its lobby is gone -- and, more importantly,
+// never reused while it is alive.
+const codes = {};
 // All games from spawn to exit, including ones still starting up and not
 // yet in `games` (which only gets a port-keyed entry once the child
 // process reports its port). Used for the per-IP cap below so a burst of
@@ -117,6 +124,35 @@ app.get('/games', (req, res) => {
       return b.timestamp - a.timestamp;
     });
   res.status(200).send(gameList);
+});
+
+// Resolve a join code to one game.
+//
+// A SHORTCUT, NOT A SECRET. Every lobby is in GET /games and stays there; the code only saves
+// a player hunting for their friend's row in a list that is sorted by age and holds everybody
+// else's games too. So enumerating this endpoint reveals nothing /games does not already hand
+// over in one request, and it does not need to resist being guessed.
+//
+// It is still covered by the global rate limiter above (100 requests per 10 seconds per IP),
+// which is what stops it being a cheap way to make the router work. That limiter already
+// existed and applies to every route -- worth saying because a limiter added to this endpoint
+// alone would imply the others were considered and deliberately left open.
+//
+// Declared after GET /games so the exact path keeps winning; Express would match them in that
+// order anyway, but the two are one character apart and the order is load-bearing.
+app.get('/games/:code', (req, res) => {
+  const code = normaliseCode(req.params.code);
+  const game = code ? codes[code] : undefined;
+
+  // A game with no port yet has been spawned but has not reported where it is listening, so
+  // there is nothing to connect to. Reporting it as absent rather than as an error is right:
+  // from the player's side it is a code that is not ready, and the answer is to try again.
+  if (!game || game.port === '?') {
+    res.status(404).send('No game with that code.');
+    return;
+  }
+
+  res.status(200).send(game.getInfo());
 });
 
 // generate challenge for this ip address
@@ -177,6 +213,11 @@ app.post('/games', (req, res) => {
   const host = req.body.host;// : 'Unknown';
   const name = req.body.name;// : 'Raifu Wars Match';
   const newGame = new Game(name, host, req.ip);
+  // Minted before the game reports a port, so the code exists for as long as the game does and
+  // is reserved against every other live game from the moment there is something to reserve it
+  // for. GET /games/:code refuses to resolve it until the port arrives.
+  newGame.code = generateCode(codes);
+  if (newGame.code) codes[newGame.code] = newGame;
   allGames.push(newGame);
   // The HTTP response is normally sent from the 'port' handler below. If the
   // game process exits before ever reporting a port (e.g. it crashed, or
@@ -222,6 +263,10 @@ app.post('/games', (req, res) => {
   });
   newGame.on('exit', (port) => {
     if (port !== '?') delete games[port];
+    // Free the code with the game, not with the port. A game that dies before ever reporting
+    // one still holds a code, and leaving it behind would leak an entry per failed spawn and
+    // slowly poison the space that generateCode draws from.
+    if (newGame.code) delete codes[newGame.code];
     const idx = allGames.indexOf(newGame);
     if (idx !== -1) allGames.splice(idx, 1);
     if (!responded) {

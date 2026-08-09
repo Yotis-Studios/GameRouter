@@ -11,6 +11,10 @@ class Game extends EventEmitter {
 
     this.db_id = null;
     this.port = '?';
+    // Short join code. Assigned by server.js rather than here, because uniqueness is a
+    // property of every game that exists and a Game knows nothing about its siblings. Stays
+    // null if the router could not mint one, which is survivable -- see code.js.
+    this.code = null;
     this.name = name;
     this.host = host;
     this.ip = ip;
@@ -111,6 +115,12 @@ class Game extends EventEmitter {
   getInfo() {
     const info = {
       name: this.name,
+      // How the HOST learns its own code: it finds its row in the list it already fetches.
+      // Adding a key to this object is additive -- a client that does not read it is
+      // unaffected -- whereas carrying the code in the POST /games response would have meant
+      // changing that response from a bare port string into something structured, which is
+      // exactly the kind of change the version gate exists to stop mid-deploy.
+      code: this.code,
       host: this.host,
       players: this.players,
       numPlayers: this.numPlayers,
