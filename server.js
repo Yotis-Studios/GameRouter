@@ -3,8 +3,25 @@ const bodyParser = require('body-parser');
 const express = require('express');
 const app = express();
 
-const { version, port, nginx } = require('./config.json');
-let { collectMetadata } = require('./config.json');
+const config = require('./config.json');
+
+// ENV OVERRIDES FOR EVERY CONFIG VALUE, so nothing has to EDIT config.json to run this
+// differently. That file is gitignored and holds the live deployment's values -- including the
+// version string, which is an exact-match compatibility gate rather than a label. Anything that
+// swaps it out and swaps it back leaves the box mis-set whenever it is killed rather than exited,
+// which is precisely when nobody is watching.
+//
+// The test harness (RaifuWars tools/net-game.sh) did exactly that: copy config.json aside, write
+// its own, restore it from a shell trap. A trap does not run on SIGKILL, and a cancelled run left
+// this deployment reporting a version it does not serve.
+//
+// config.json stays the source of truth; the environment only overrides it.
+const version = process.env.VERSION || config.version;
+const port = process.env.PORT || config.port;
+const nginx = process.env.NGINX ? process.env.NGINX === '1' : config.nginx;
+let collectMetadata = process.env.COLLECT_METADATA
+  ? process.env.COLLECT_METADATA === '1'
+  : config.collectMetadata;
 
 // In nginx mode, all requests arrive via the local reverse proxy, so trust
 // its X-Forwarded-For header to recover the real client IP -- otherwise
@@ -227,5 +244,10 @@ app.post('/games', (req, res) => {
 
 app.listen(port, () => {
   console.log(`GameRouter launched on ${port}` + (nginx ? ' (nginx proxy mode)' : ''));
+  // The version is a compatibility gate, not a label -- a client whose string differs by one
+  // character sees no servers at all. Print what is in force, because "no games found" is what
+  // both a wrong version and an unreachable router look like from inside the game.
+  console.log(`Serving version ${version}` +
+    (process.env.VERSION ? ' (from $VERSION)' : ' (from config.json)'));
 });
 //module.exports = app;
