@@ -2,8 +2,21 @@ const { spawn } = require('child_process');
 const EventEmitter = require('events').EventEmitter;
 const path = require('path');
 
-const GAME_SERVER_DIR = path.resolve(__dirname, '../RaifuWarsServer');
-const HEMLOCK_BIN = 'hemlock';
+// WHERE THE GAME SERVER LIVES, and why this is not just a relative path any more.
+//
+// The default resolves to a sibling `RaifuWarsServer` directory. On the production host
+// that name is already taken -- by the OLD 1.13 Node server, a tree full of index.js and
+// node_modules. Spawning `hemlock server.hml` in it does not fail loudly; it fails as a
+// game that never reports a port, which reaches the player as a lobby that will not start
+// and the log as nothing in particular.
+//
+// GAME_SERVER_DIR points at the shikikan checkout instead. HEMLOCK_BIN is overridable for
+// the same class of reason: this is spawned by a pm2-managed process whose PATH is
+// whatever pm2 was started with rather than a login shell's, so /usr/local/bin is not
+// guaranteed to be on it.
+const GAME_SERVER_DIR = process.env.GAME_SERVER_DIR
+  || path.resolve(__dirname, '../RaifuWarsServer');
+const HEMLOCK_BIN = process.env.HEMLOCK_BIN || 'hemlock';
 
 class Game extends EventEmitter {
   constructor(name, host, ip) {
