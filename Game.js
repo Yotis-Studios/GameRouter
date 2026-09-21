@@ -57,8 +57,24 @@ class Game extends EventEmitter {
       }
     });
 
+    // KEPT, not just printed. A game that dies before reporting a port becomes a bare
+    // "502 Game server failed to start" at the client, and the actual reason -- always in
+    // the child's stderr -- lands in a DIFFERENT pm2 log file from the "Starting a game"
+    // line, interleaved with every other game's output. Correlating the two by eye is what
+    // made a three-layer startup failure (no libwebsockets, then no stdlib, then no
+    // hem_modules) take three round trips to diagnose instead of one.
+    //
+    // Capped, because this buffer exists for the moments after a spawn and a healthy game
+    // runs for hours: without a cap, a server that logs to stderr in a loop would grow it
+    // for the life of the match.
+    this._stderr = [];
     this.process.stderr.on('data', (data) => {
-      console.error(`(${this.port}): ${data.toString().trim()}`);
+      const text = data.toString().trim();
+      if (text) {
+        this._stderr.push(text);
+        if (this._stderr.length > 20) this._stderr.shift();
+      }
+      console.error(`(${this.port}): ${text}`);
     });
 
     // Without this, a failed spawn (missing hemlock binary, bad cwd, or the
@@ -77,6 +93,20 @@ class Game extends EventEmitter {
 
     this.process.on('exit', (code, signal) => {
       console.log(`(${this.port}): exited with code ${code} signal ${signal}`);
+
+      // DIED BEFORE IT EVER REPORTED A PORT, which is the failure the client sees as 502 and
+      // the only one where the stderr is the whole answer. Printed here, next to the exit, so
+      // cause and effect are one entry rather than two files.
+      if (this.port === '?') {
+        console.error(`game server never reported a port (exit ${code}${signal ? ' signal ' + signal : ''})`);
+        console.error(`  cwd: ${GAME_SERVER_DIR}   bin: ${HEMLOCK_BIN}`);
+        if (this._stderr.length) {
+          for (const line of this._stderr) console.error(`  | ${line}`);
+        } else {
+          console.error('  | (nothing on stderr -- check that the binary and cwd above exist)');
+        }
+      }
+
       if (!this._exited) {
         this._exited = true;
         this.emit('exit', this.port);
