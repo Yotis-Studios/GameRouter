@@ -2,6 +2,10 @@ const { spawn } = require('child_process');
 const EventEmitter = require('events').EventEmitter;
 const path = require('path');
 
+// Read the same way server.js reads it, from the same file. getInfo() needs it to tell a
+// joining client how to reach a lobby -- see the note there.
+const { nginx } = require('./config.json');
+
 // WHERE THE GAME SERVER LIVES, and why this is not just a relative path any more.
 //
 // The default resolves to a sibling `RaifuWarsServer` directory. On the production host
@@ -151,6 +155,20 @@ class Game extends EventEmitter {
     this[event] = value;
   }
 
+  // HOW TO REACH THIS LOBBY, not just which port it sits on.
+  //
+  // In nginx mode the port is NOT dialable: production runs ufw default-deny with only
+  // 22, 80, 443, 42069 and 6969 open, so a player's new inbound connection to a spawned
+  // lobby is dropped and the client sits on "Connection timed out". Every lobby is reached
+  // through the reverse proxy instead, by path, on :80.
+  //
+  // The HOST already learns this -- POST /games answers `/game/<port>` when nginx is set
+  // (see server.js). A JOINER had no way to know: the listing gave it a bare port number
+  // and it dialled straight into the firewall. So the listing says it too, and a client
+  // that finds `path` uses it in preference to `port`.
+  //
+  // ADDITIVE ON PURPOSE. `port` stays exactly as it was, so a client that does not know
+  // about this field behaves as before, and a router with nginx off emits no path at all.
   getInfo() {
     const info = {
       name: this.name,
@@ -164,6 +182,9 @@ class Game extends EventEmitter {
       gameSpeed: this.gameSpeed,
       gameLength: this.gameLength
     };
+    if (nginx) {
+      info.path = `/game/${this.port}`;
+    }
     if (this.mapHash && this.mapName) {
       info.map = {
         hash: this.mapHash,
