@@ -2,8 +2,25 @@ const { spawn } = require('child_process');
 const EventEmitter = require('events').EventEmitter;
 const path = require('path');
 
-const GAME_SERVER_DIR = path.resolve(__dirname, '../RaifuWarsServer');
-const HEMLOCK_BIN = 'hemlock';
+// Read the same way server.js reads it, from the same file. getInfo() needs it to tell a
+// joining client how to reach a lobby -- see the note there.
+const { nginx } = require('./config.json');
+
+// WHERE THE GAME SERVER LIVES, and why this is not just a relative path any more.
+//
+// The default resolves to a sibling `RaifuWarsServer` directory. On the production host
+// that name is already taken -- by the OLD 1.13 Node server, a tree full of index.js and
+// node_modules. Spawning `hemlock server.hml` in it does not fail loudly; it fails as a
+// game that never reports a port, which reaches the player as a lobby that will not start
+// and the log as nothing in particular.
+//
+// GAME_SERVER_DIR points at the shikikan checkout instead. HEMLOCK_BIN is overridable for
+// the same class of reason: this is spawned by a pm2-managed process whose PATH is
+// whatever pm2 was started with rather than a login shell's, so /usr/local/bin is not
+// guaranteed to be on it.
+const GAME_SERVER_DIR = process.env.GAME_SERVER_DIR
+  || path.resolve(__dirname, '../RaifuWarsServer');
+const HEMLOCK_BIN = process.env.HEMLOCK_BIN || 'hemlock';
 
 class Game extends EventEmitter {
   constructor(name, host, ip) {
@@ -44,8 +61,24 @@ class Game extends EventEmitter {
       }
     });
 
+    // KEPT, not just printed. A game that dies before reporting a port becomes a bare
+    // "502 Game server failed to start" at the client, and the actual reason -- always in
+    // the child's stderr -- lands in a DIFFERENT pm2 log file from the "Starting a game"
+    // line, interleaved with every other game's output. Correlating the two by eye is what
+    // made a three-layer startup failure (no libwebsockets, then no stdlib, then no
+    // hem_modules) take three round trips to diagnose instead of one.
+    //
+    // Capped, because this buffer exists for the moments after a spawn and a healthy game
+    // runs for hours: without a cap, a server that logs to stderr in a loop would grow it
+    // for the life of the match.
+    this._stderr = [];
     this.process.stderr.on('data', (data) => {
-      console.error(`(${this.port}): ${data.toString().trim()}`);
+      const text = data.toString().trim();
+      if (text) {
+        this._stderr.push(text);
+        if (this._stderr.length > 20) this._stderr.shift();
+      }
+      console.error(`(${this.port}): ${text}`);
     });
 
     // Without this, a failed spawn (missing hemlock binary, bad cwd, or the
@@ -64,6 +97,20 @@ class Game extends EventEmitter {
 
     this.process.on('exit', (code, signal) => {
       console.log(`(${this.port}): exited with code ${code} signal ${signal}`);
+
+      // DIED BEFORE IT EVER REPORTED A PORT, which is the failure the client sees as 502 and
+      // the only one where the stderr is the whole answer. Printed here, next to the exit, so
+      // cause and effect are one entry rather than two files.
+      if (this.port === '?') {
+        console.error(`game server never reported a port (exit ${code}${signal ? ' signal ' + signal : ''})`);
+        console.error(`  cwd: ${GAME_SERVER_DIR}   bin: ${HEMLOCK_BIN}`);
+        if (this._stderr.length) {
+          for (const line of this._stderr) console.error(`  | ${line}`);
+        } else {
+          console.error('  | (nothing on stderr -- check that the binary and cwd above exist)');
+        }
+      }
+
       if (!this._exited) {
         this._exited = true;
         this.emit('exit', this.port);
@@ -108,6 +155,20 @@ class Game extends EventEmitter {
     this[event] = value;
   }
 
+  // HOW TO REACH THIS LOBBY, not just which port it sits on.
+  //
+  // In nginx mode the port is NOT dialable: production runs ufw default-deny with only
+  // 22, 80, 443, 42069 and 6969 open, so a player's new inbound connection to a spawned
+  // lobby is dropped and the client sits on "Connection timed out". Every lobby is reached
+  // through the reverse proxy instead, by path, on :80.
+  //
+  // The HOST already learns this -- POST /games answers `/game/<port>` when nginx is set
+  // (see server.js). A JOINER had no way to know: the listing gave it a bare port number
+  // and it dialled straight into the firewall. So the listing says it too, and a client
+  // that finds `path` uses it in preference to `port`.
+  //
+  // ADDITIVE ON PURPOSE. `port` stays exactly as it was, so a client that does not know
+  // about this field behaves as before, and a router with nginx off emits no path at all.
   getInfo() {
     const info = {
       name: this.name,
@@ -121,6 +182,9 @@ class Game extends EventEmitter {
       gameSpeed: this.gameSpeed,
       gameLength: this.gameLength
     };
+    if (nginx) {
+      info.path = `/game/${this.port}`;
+    }
     if (this.mapHash && this.mapName) {
       info.map = {
         hash: this.mapHash,

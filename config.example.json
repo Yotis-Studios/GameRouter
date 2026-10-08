@@ -2,5 +2,5 @@
     "version": "v1.14.0",
     "port": 42069,
     "collectMetadata": true,
-    "nginx": false
+    "nginx": true
 }
