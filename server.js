@@ -53,6 +53,40 @@ const db = new sqlite3.Database('gamedata.db', (err) => {
   }
 });
 
+// THE SCHEMA, which nothing created. MasterServer's gamedata.db shipped with these tables
+// already in it; GameRouter opens a fresh file, so on its first deploy every hosted lobby
+// logged `SQLITE_ERROR: no such table: session` and no metadata was collected at all.
+// Copied verbatim from MasterServer's database so the two stay queryable the same way.
+// `serialize` keeps these ahead of the first INSERT, which can arrive as soon as we listen.
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS map (
+    hash VARCHAR(40) NOT NULL PRIMARY KEY,
+    name VARCHAR(100)
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS session (
+    id        INTEGER NOT NULL PRIMARY KEY,
+    timestamp DATETIME,
+    length    INTEGER,
+    ip        VARCHAR(100),
+    port      INTEGER,
+    name      VARCHAR(100),
+    locked    BOOLEAN,
+    host      VARCHAR(100)
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS match (
+    id         INTEGER NOT NULL PRIMARY KEY,
+    session_id INTEGER,
+    players    INTEGER,
+    speed      INTEGER,
+    length     INTEGER,
+    map        VARCHAR(40),
+    FOREIGN KEY (session_id) REFERENCES session(id),
+    FOREIGN KEY (map) REFERENCES map(hash)
+  )`, (err) => {
+    if (err) console.error('Failed to create the gamedata schema: ' + err.message);
+  });
+});
+
 const { Webhook } = require('discord-webhook-node');
 const discord = discordHook ? new Webhook(discordHook) : null;
 
