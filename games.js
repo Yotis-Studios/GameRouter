@@ -19,7 +19,8 @@
 //
 //   version    the exact-match compatibility gate for this game, and part of its proof-of-work
 //              constant. Required.
-//   serverDir  where to spawn the server (cwd). Default: GAME_SERVER_DIR, then ../RaifuWarsServer.
+//   serverDir  where to spawn the server (cwd); a leading ~ is the home directory. Default:
+//              GAME_SERVER_DIR, then ../RaifuWarsServer.
 //   bin        the binary. Default: HEMLOCK_BIN, then "hemlock".
 //   args       its arguments. Default: ["server.hml"].
 //   env        extra environment for the child, on top of this process's own.
@@ -45,7 +46,16 @@
 // router, and the alternative -- answering as the default -- would list a stranger's lobbies.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+
+// A leading ~ is the home directory, because descriptors are written by hand and by test
+// harnesses that know the server as ~/Yotis/shikikan.hml; path.resolve would make it a
+// directory literally named ~ and the game would "never report a port".
+function expandHome(p) {
+  if (p === '~' || p.startsWith('~/')) return path.join(os.homedir(), p.slice(1));
+  return p;
+}
 
 const DEFAULT_SERVER_DIR = process.env.GAME_SERVER_DIR
   || path.resolve(__dirname, '../RaifuWarsServer');
@@ -63,7 +73,7 @@ function normalise(id, raw) {
   return {
     id,
     version: raw.version,
-    serverDir: raw.serverDir ? path.resolve(raw.serverDir) : DEFAULT_SERVER_DIR,
+    serverDir: raw.serverDir ? path.resolve(expandHome(raw.serverDir)) : DEFAULT_SERVER_DIR,
     bin: raw.bin || DEFAULT_BIN,
     args: Array.isArray(raw.args) ? raw.args.slice() : DEFAULT_ARGS.slice(),
     env,
