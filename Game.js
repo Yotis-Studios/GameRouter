@@ -6,25 +6,19 @@ const path = require('path');
 // joining client how to reach a lobby -- see the note there.
 const { nginx } = require('./config.json');
 
-// WHERE THE GAME SERVER LIVES, and why this is not just a relative path any more.
-//
-// The default resolves to a sibling `RaifuWarsServer` directory. On the production host
-// that name is already taken -- by the OLD 1.13 Node server, a tree full of index.js and
-// node_modules. Spawning `hemlock server.hml` in it does not fail loudly; it fails as a
-// game that never reports a port, which reaches the player as a lobby that will not start
-// and the log as nothing in particular.
-//
-// GAME_SERVER_DIR points at the shikikan checkout instead. HEMLOCK_BIN is overridable for
-// the same class of reason: this is spawned by a pm2-managed process whose PATH is
-// whatever pm2 was started with rather than a login shell's, so /usr/local/bin is not
-// guaranteed to be on it.
-const GAME_SERVER_DIR = process.env.GAME_SERVER_DIR
-  || path.resolve(__dirname, '../RaifuWarsServer');
-const HEMLOCK_BIN = process.env.HEMLOCK_BIN || 'hemlock';
+// WHERE THE GAME SERVER LIVES is now the game descriptor's business (games.js): its
+// serverDir, bin, args and env. The defaults there are the ones that used to live here --
+// GAME_SERVER_DIR then ../RaifuWarsServer, HEMLOCK_BIN then `hemlock` -- and the reasons
+// still apply: a wrong directory does not fail loudly, it fails as a game that never
+// reports a port, and a pm2-managed process has whatever PATH pm2 was started with.
 
 class Game extends EventEmitter {
-  constructor(name, host, ip) {
+  constructor(name, host, ip, descriptor) {
     super();
+
+    // Which game this lobby belongs to. Listed and filtered by it; never joined across it.
+    this.game = descriptor.id;
+    this.descriptor = descriptor;
 
     this.db_id = null;
     this.port = '?';
@@ -45,8 +39,9 @@ class Game extends EventEmitter {
     this.mapHash = undefined;
     this.mapName = undefined;
 
-    this.process = spawn(HEMLOCK_BIN, ['server.hml'], {
-      cwd: GAME_SERVER_DIR,
+    this.process = spawn(descriptor.bin, descriptor.args, {
+      cwd: descriptor.serverDir,
+      env: Object.assign({}, process.env, descriptor.env),
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -107,7 +102,7 @@ class Game extends EventEmitter {
       // cause and effect are one entry rather than two files.
       if (this.port === '?') {
         console.error(`game server never reported a port (exit ${code}${signal ? ' signal ' + signal : ''})`);
-        console.error(`  cwd: ${GAME_SERVER_DIR}   bin: ${HEMLOCK_BIN}`);
+        console.error(`  game: ${this.game}   cwd: ${this.descriptor.serverDir}   bin: ${this.descriptor.bin} ${this.descriptor.args.join(' ')}`);
         if (this._stderr.length) {
           for (const line of this._stderr) console.error(`  | ${line}`);
         } else {
@@ -175,6 +170,9 @@ class Game extends EventEmitter {
   // about this field behaves as before, and a router with nginx off emits no path at all.
   getInfo() {
     const info = {
+      // Which game: the list is already filtered by it, so this is for a client that wants to
+      // be sure, and for anyone reading the JSON by hand.
+      game: this.game,
       name: this.name,
       // How the HOST learns its own code: it finds its row in the list it already fetches.
       // Adding a key to this object is additive -- a client that does not read it is

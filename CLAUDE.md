@@ -44,6 +44,10 @@ Secrets are loaded from environment variables, never committed to the repo:
 - `DISCORD_WEBHOOK` - Optional Discord webhook URL for notifications
 
 Non-sensitive config lives in `config.json` (gitignored, create from `config.example.json`).
+Which games are served, with their version gates and launch commands, lives in `games.json`
+(gitignored, create from `games.example.json`) or `$GAMES_JSON`; without either the router
+serves one game from `config.json`. Every endpoint takes `game=<id>`; none means the default
+game, an unknown one is 404, and lobbies never list or resolve across games.
 
 ## Development
 
@@ -56,6 +60,7 @@ ACCESS_KEY=your_key node server.js
 ## Files
 
 - `server.js` - Express HTTP server, routes, rate limiting, SQLite metadata
-- `Game.js` - Game process lifecycle, spawns Hemlock, parses NDJSON events
+- `games.js` - The game descriptors: which games are served, each one's version gate and server launch command (`games.json`, `$GAMES_JSON`, or one game from `config.json`)
+- `Game.js` - Game process lifecycle, spawns the descriptor's server, parses NDJSON events
 - `challenge.js` - Proof-of-work challenge generation and verification (MD5)
 - `config.example.json` - Template config (version, port, collectMetadata)
