@@ -40,7 +40,26 @@ const discordHook = process.env.DISCORD_WEBHOOK;
 
 const { generateChallenge, testSolution } = require('./challenge.js');
 const { generateCode, normalise: normaliseCode } = require('./code.js');
+const { loadGames, resolveGame } = require('./games.js');
 const Game = require('./Game');
+
+// WHICH GAMES THIS ROUTER SERVES -- see games.js. With no games.json and no $GAMES_JSON this
+// is one game built from the version above, named by config.json's "game" (default
+// "raifuwars"), and every route behaves exactly as it did before descriptors existed.
+const catalogue = loadGames({ version, game: config.game });
+
+// 404 for a request that names a game this router does not serve. Answering as the default
+// instead would list one game's lobbies to another game's client, which is the one thing the
+// descriptors exist to prevent.
+function gameFor(req, res) {
+  const named = req.query.game !== undefined ? req.query.game : (req.body ? req.body.game : undefined);
+  const game = resolveGame(catalogue, named);
+  if (!game) {
+    res.status(404).send('No such game.');
+    console.error(`${req.ip} asked for game "${named}", which this router does not serve`);
+  }
+  return game;
+}
 
 const sqlite3 = require('sqlite3');
 const db = new sqlite3.Database('gamedata.db', (err) => {
@@ -144,14 +163,23 @@ function countGamesForIp(ip) {
   return allGames.filter((g) => g.ip === ip).length;
 }
 
+// The version is PER GAME now: `?game=<id>` asks for that game's, nothing asks for the
+// default's, which is what every client before descriptors asked for.
 app.get('/version', (req, res) => {
-  res.status(200).send(version);
+  const game = gameFor(req, res);
+  if (!game) return;
+  res.status(200).send(game.version);
 });
 
 // Return joinable games sorted by timestamp
 app.get('/games', (req, res) => {
+  const game = gameFor(req, res);
+  if (!game) return;
+  // ONLY THIS GAME'S LOBBIES. A client never sees a lobby it could not join, and a client
+  // that names no game sees the default game's, as it always did.
   const gameList = Object.keys(games)
     // .filter(port => games[port].canJoin())
+    .filter(port => games[port].game === game.id)
     .map(port => {
       return games[port].getInfo();
     }).sort((a, b) => {
@@ -175,13 +203,18 @@ app.get('/games', (req, res) => {
 // Declared after GET /games so the exact path keeps winning; Express would match them in that
 // order anyway, but the two are one character apart and the order is load-bearing.
 app.get('/games/:code', (req, res) => {
+  const which = gameFor(req, res);
+  if (!which) return;
   const code = normaliseCode(req.params.code);
   const game = code ? codes[code] : undefined;
 
   // A game with no port yet has been spawned but has not reported where it is listening, so
   // there is nothing to connect to. Reporting it as absent rather than as an error is right:
   // from the player's side it is a code that is not ready, and the answer is to try again.
-  if (!game || game.port === '?') {
+  //
+  // Another game's code is absent too, not forbidden: a code is a shortcut into THIS game's
+  // list, and a lobby that list would never show is one this client cannot have been told.
+  if (!game || game.port === '?' || game.game !== which.id) {
     res.status(404).send('No game with that code.');
     return;
   }
@@ -205,13 +238,16 @@ app.post('/games', (req, res) => {
     console.error(req.ip + " did not provide body");
     return;
   }
+  // Which game to spawn, before the proof of work is checked: the constant is per game.
+  const which = gameFor(req, res);
+  if (!which) return;
   // Check the user's proof of work before hosting new game
   const pow = req.body.pow;
   if (pow) {
     const stored = challenges[req.ip];
     const challenge = stored && stored.expires > Date.now() ? stored.value : undefined;
     delete challenges[req.ip];
-    const challengeConstant = accessKey + version;
+    const challengeConstant = accessKey + which.version;
     if (!testSolution(challengeConstant, challenge, pow)) {
       res.status(401);
       res.send('Authentication failed.');
@@ -242,11 +278,11 @@ app.post('/games', (req, res) => {
     return;
   }
 
-  console.log(`Starting a game for ${req.ip} (${numGames+1}/${maxGames})`);
+  console.log(`Starting a ${which.id} game for ${req.ip} (${numGames+1}/${maxGames})`);
 
   const host = req.body.host;// : 'Unknown';
   const name = req.body.name;// : 'Raifu Wars Match';
-  const newGame = new Game(name, host, req.ip);
+  const newGame = new Game(name, host, req.ip, which);
   // Minted before the game reports a port, so the code exists for as long as the game does and
   // is reserved against every other live game from the moment there is something to reserve it
   // for. GET /games/:code refuses to resolve it until the port arrives.
@@ -272,7 +308,7 @@ app.post('/games', (req, res) => {
         newGame.db_id = this.lastID;
       }
     });
-    if (discord != null) discord.send(`**${host}** started a game for Raifu Wars ${version}`);
+    if (discord != null) discord.send(`**${host}** started a game for ${which.id} ${which.version}`);
   });
   newGame.on('start', () => {
     // insert match into database
@@ -328,5 +364,13 @@ app.listen(port, () => {
   // both a wrong version and an unreachable router look like from inside the game.
   console.log(`Serving version ${version}` +
     (process.env.VERSION ? ' (from $VERSION)' : ' (from config.json)'));
+  // Every game served, one line each, with where the server is spawned from: a lobby that
+  // never reports a port is nearly always a wrong serverDir, and this is where to check it.
+  console.log(`Games from ${catalogue.source}:`);
+  for (const id of Object.keys(catalogue.games)) {
+    const g = catalogue.games[id];
+    const extra = Object.keys(g.env).map((k) => `${k}=${g.env[k]}`).join(' ');
+    console.log(`  ${id} ${g.version}${g.default ? ' (default)' : ''}: ${g.bin} ${g.args.join(' ')} in ${g.serverDir}${extra ? '  ' + extra : ''}`);
+  }
 });
 //module.exports = app;

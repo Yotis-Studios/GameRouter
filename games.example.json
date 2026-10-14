@@ -1,0 +1,11 @@
+{
+    "raifuwars": {
+        "version": "v1.14.0",
+        "default": true
+    },
+    "ganbatte-sample": {
+        "version": "v0.1.0",
+        "serverDir": "../shikikan.hml",
+        "env": { "SHIKIKAN_REQUIRE_MAP": "0" }
+    }
+}

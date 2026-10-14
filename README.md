@@ -54,14 +54,40 @@ node server.js
 |--------|----------|-------------|
 | GET | `/version` | Returns the game version string |
 | GET | `/games` | Lists active games sorted by newest first |
+| GET | `/games/:code` | Resolves a short join code to one lobby |
 | POST | `/challenge` | Generates a proof-of-work challenge for the caller |
 | POST | `/games` | Hosts a new game (requires PoW solution in body) |
+
+Every endpoint takes an optional `game=<id>` (a query parameter on GET, a body field on
+POST) naming which of the configured games it is about. A request that names none means the
+default game; one that names a game this router does not serve is answered `404`. Lobbies
+are listed, resolved and joined only within their own game.
+
+### Multiple games
+
+One router can serve more than one game, each with its own version gate and its own server
+launch command. Copy `games.example.json` to `games.json` (gitignored):
+
+```json
+{
+    "raifuwars":       { "version": "v1.14.0", "default": true },
+    "ganbatte-sample": { "version": "v0.1.0",
+                         "serverDir": "../shikikan.hml",
+                         "env": { "SHIKIKAN_REQUIRE_MAP": "0" } }
+}
+```
+
+`version` is required. `serverDir`, `bin`, `args` and `env` default to `GAME_SERVER_DIR`
+(then `../RaifuWarsServer`), `HEMLOCK_BIN` (then `hemlock`), `["server.hml"]` and nothing.
+`GAMES_JSON` in the environment overrides the file, as a path or as inline JSON, so a test
+run never writes on the host. With neither, the router serves one game from `config.json`'s
+`version`, named by its `game` field (default `raifuwars`), exactly as before.
 
 ### Hosting a game
 
 1. `POST /challenge` to get a challenge number
 2. Find a `solution` such that `MD5(ACCESS_KEY + version + challenge + solution)` starts with `000`
-3. `POST /games` with body `pow=<solution>&host=<name>&name=<lobby_name>`
+3. `POST /games` with body `pow=<solution>&host=<name>&name=<lobby_name>` (and `&game=<id>` for a game other than the default)
 4. Response is the game server port (or WebSocket path in nginx mode)
 
 ## nginx Reverse Proxy
