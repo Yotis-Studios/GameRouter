@@ -109,6 +109,29 @@ db.serialize(() => {
 const { Webhook } = require('discord-webhook-node');
 const discord = discordHook ? new Webhook(discordHook) : null;
 
+// CORS, for a game built for the browser (GameMaker's GX.games or HTML5 targets). Such a game is
+// a web page on its own origin, and the browser hands it the router's answers only when the
+// router says that origin may read them; without this every /version and /games came back as
+// "no answer" in the page, though the router had replied. Off unless ROUTER_CORS_ORIGINS is set:
+// a comma-separated list of origins ("https://example.gx.games"), or "*" for any. The requests
+// the engine's router client makes are simple ones (GET; POST with a form body), so only the
+// Allow-Origin header is needed; a preflight is answered anyway.
+const corsOrigins = (process.env.ROUTER_CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(s => s !== '');
+if (corsOrigins.length > 0) {
+  console.log('CORS on for ' + corsOrigins.join(', '));
+  app.use((req, res, next) => {
+    const origin = req.get('Origin');
+    if (origin && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
+      res.set('Access-Control-Allow-Origin', corsOrigins.includes('*') ? '*' : origin);
+      res.set('Vary', 'Origin');
+      res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.set('Access-Control-Allow-Headers', 'Content-Type');
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+    }
+    next();
+  });
+}
+
 // Limit to 100 requests every 10 seconds
 const rateLimit = require("express-rate-limit");
 app.use(rateLimit({
