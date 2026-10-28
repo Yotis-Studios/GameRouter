@@ -31,7 +31,14 @@ let collectMetadata = process.env.COLLECT_METADATA
 // nginx is expected to run on the same host per the documented setup.
 // Outside nginx mode, leave Express's default (don't trust proxy headers
 // at all) so a client can't spoof its IP via X-Forwarded-For directly.
-if (nginx) {
+//
+// TRUST_LOOPBACK_PROXY=1 does the same without nginx mode: lobbies are still handed out as bare
+// ports (desktop clients dial them directly, as before), while requests that arrive through a
+// local reverse proxy -- a browser build, which may only call https on the site's own origin --
+// keep their client's address. Express trusts the header only when the immediate peer is
+// loopback, so a client dialling the router directly still cannot spoof its IP.
+const trustLoopbackProxy = nginx || process.env.TRUST_LOOPBACK_PROXY === '1' || config.trustLoopbackProxy === true;
+if (trustLoopbackProxy) {
   app.set('trust proxy', 'loopback');
 }
 
@@ -358,7 +365,7 @@ app.post('/games', (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`GameRouter launched on ${port}` + (nginx ? ' (nginx proxy mode)' : ''));
+  console.log(`GameRouter launched on ${port}` + (nginx ? ' (nginx proxy mode)' : '') + (!nginx && trustLoopbackProxy ? ' (trusting a loopback proxy for client addresses)' : ''));
   // The version is a compatibility gate, not a label -- a client whose string differs by one
   // character sees no servers at all. Print what is in force, because "no games found" is what
   // both a wrong version and an unreachable router look like from inside the game.
