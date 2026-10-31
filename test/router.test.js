@@ -243,6 +243,11 @@ test('A player report reaches the admin API with the lines the server kept', asy
   assert.equal(report.match, id, 'the router names the match, not the server');
   assert.deepEqual([report.reporter, report.reported, report.reportedName, report.reason], ['g:1', 'g:2', 'Bee', 'rude']);
   assert.deepEqual(report.lines, [{ at: 1, sub: 'g:2', name: 'Bee', text: 'you are bad' }]);
+  // Passed on to the account service, named by this router.
+  await until(() => account.reports.length === 1);
+  assert.deepEqual([account.reports[0].router, account.reports[0].match, account.reports[0].reporter, account.reports[0].reportedName], ['main', id, 'g:1', 'Bee']);
+  assert.equal('forwarded' in account.reports[0], false);
+  await until(async () => (await r.admin('/admin/matches/' + id)).body.reports[0].forwarded === true);
 });
 
 test('Without the platform settings the router runs as before', async (t) => {

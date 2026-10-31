@@ -20,6 +20,8 @@
 //   ADMIN_HOST       the address it binds. Default 127.0.0.1: the admin API is never on the port
 //                    the public proxy forwards.
 //   BAN_REFRESH_MS   how often the ban list is fetched. Default 30000.
+//   ROUTER_NAME      this router's name in the account service's ROUTERS, sent with the reports
+//                    it passes on so staff can find the match. Default "main".
 
 const fs = require('fs');
 const path = require('path');
@@ -44,5 +46,6 @@ module.exports = {
   serviceKey: env.SERVICE_KEY || '',
   adminPort: env.ADMIN_PORT ? Number(env.ADMIN_PORT) : (json.adminPort || 0),
   adminHost: env.ADMIN_HOST || json.adminHost || '127.0.0.1',
-  banRefreshMs: Number(env.BAN_REFRESH_MS || json.banRefreshMs || 30000)
+  banRefreshMs: Number(env.BAN_REFRESH_MS || json.banRefreshMs || 30000),
+  routerName: env.ROUTER_NAME || json.routerName || 'main'
 };

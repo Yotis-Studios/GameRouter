@@ -31,7 +31,7 @@ function freePort() {
 async function accountService(t) {
   let { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
   let kid = 'test-key';
-  const state = { bans: [], banRequests: 0 };
+  const state = { bans: [], banRequests: 0, reports: [] };
   state.jwks = () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid, alg: 'EdDSA', use: 'sig' }] });
   // A new signing key, as when the account service rotates it.
   state.rotate = () => {
@@ -42,6 +42,16 @@ async function accountService(t) {
     if (req.url === '/api/.well-known/jwks') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(state.jwks()));
+    }
+    if (req.url === '/internal/reports' && req.method === 'POST' && req.headers['x-service-key'] === SERVICE_KEY) {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        state.reports.push(JSON.parse(body));
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ id: state.reports.length }));
+      });
+      return;
     }
     if (req.url === '/internal/bans' && req.headers['x-service-key'] === SERVICE_KEY) {
       state.banRequests++;

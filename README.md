@@ -105,7 +105,9 @@ and every existing client works unchanged either way.
 The listing gains `id` (the match id), `public`, `humans`, `bots` and `joinable`; every old
 field is unchanged. Each match is given the player token key set (`ROUTER_JWKS`) so its server
 verifies players itself, and is sent the new set when the account service rotates it. Players'
-reports (with the chat lines the server kept) show in the admin API's match details.
+reports (with the chat lines the server kept) are passed on to the account service
+(`POST /internal/reports`, named by `ROUTER_NAME`, default `main`) and show in the admin API's
+match details with `forwarded` saying whether they arrived.
 
 ### Quick Play
 
