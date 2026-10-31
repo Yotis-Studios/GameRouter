@@ -57,6 +57,7 @@ node server.js
 | GET | `/games/:code` | Resolves a short join code to one lobby |
 | POST | `/challenge` | Generates a proof-of-work challenge for the caller |
 | POST | `/games` | Hosts a new game (requires PoW solution in body) |
+| POST | `/quickplay` | A seat in a public match, for a Yotis Online player (see below) |
 
 Every endpoint takes an optional `game=<id>` (a query parameter on GET, a body field on
 POST) naming which of the configured games it is about. A request that names none means the
@@ -89,6 +90,57 @@ run never writes on the host. With neither, the router serves one game from `con
 2. Find a `solution` such that `MD5(ACCESS_KEY + version + challenge + solution)` starts with `000`
 3. `POST /games` with body `pow=<solution>&host=<name>&name=<lobby_name>` (and `&game=<id>` for a game other than the default)
 4. Response is the game server port (or WebSocket path in nginx mode)
+
+## Yotis Online
+
+The platform features (yo-account-api `docs/PLATFORM.md`, phase P3) are off until configured,
+and every existing client works unchanged either way.
+
+| Setting | |
+|---------|--|
+| `ACCOUNT_API_URL` | The account service. Player tokens are checked against its public key (`/api/.well-known/jwks`), offline. Turns on Quick Play. |
+| `SERVICE_KEY` | Shared with the account service. Turns on the ban list (`/internal/bans`, refreshed every `BAN_REFRESH_MS`, 30 s) and is required on every admin API request. |
+| `ADMIN_PORT`, `ADMIN_HOST` | The admin API's own listener; `ADMIN_HOST` defaults to `127.0.0.1`. Never put it behind the public proxy. |
+
+The listing gains `id` (the match id), `public`, `humans`, `bots` and `joinable`; every old
+field is unchanged.
+
+### Quick Play
+
+A game offers it when its descriptor says `"quickplay": true` (or `{"seats": n}`, the seats a
+new match has until its server reports `numPlayers`). `POST /quickplay` with the player token in
+`Authorization` (raw or `Bearer`) and `game=<id>` answers
+`{match, game, code, port, path?, ticket, expires}`. The router picks the public match with the
+most humans and a free seat (a started one only if its server reports `joinable`), or starts a
+new public match, and holds the seat for 30 seconds. The client connects and presents the ticket
+with its token; the server seats only that player on it. Guests are welcome; anyone banned from
+public play (in the router's ban list or the token's `restrict` claim) gets 403. Ten requests a
+minute per player.
+
+### Bans
+
+A ban on `all` kicks the player from any match and refuses Quick Play; `public_play` does the same
+for public matches only; `chat` mutes them. Checked when a server reports a join and for everyone
+seated after every refresh. A failed refresh keeps the last list.
+
+### Admin API
+
+On `ADMIN_HOST:ADMIN_PORT`, every request with `X-Service-Key` (anything else is 404):
+
+| Method | Endpoint | |
+|--------|----------|--|
+| GET | `/admin/matches[?game=]` | Every live match with its roster, reservations, process and uptime |
+| GET | `/admin/matches/:id` | One match |
+| POST | `/admin/matches/:id/kick` | `{sub, reason}` |
+| POST | `/admin/matches/:id/announce` | `{text}` |
+| POST | `/admin/matches/:id/close` | `{reason}`; terminated if it has not ended 10 s later |
+| POST | `/admin/bans/refresh` | Fetch the ban list now |
+
+### Testing
+
+`npm test` runs the real router in a child process against stub game servers
+(`test/stub-game.js`) and a stub account service, on loopback. Nothing is written next to the
+router.
 
 ## nginx Reverse Proxy
 

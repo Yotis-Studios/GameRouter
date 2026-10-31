@@ -26,6 +26,9 @@
 //   env        extra environment for the child, on top of this process's own.
 //   default    the game a request means when it names none. Exactly one game is the default:
 //              the one that says so, otherwise the first listed.
+//   quickplay  offer POST /quickplay for this game: true, or {"seats": n} for the seats a new
+//              Quick Play match has until its server reports numPlayers (default 4). Needs
+//              ACCOUNT_API_URL (player tokens). Off by default.
 //
 // WHERE IT COMES FROM, in order:
 //
@@ -77,8 +80,18 @@ function normalise(id, raw) {
     bin: raw.bin || DEFAULT_BIN,
     args: Array.isArray(raw.args) ? raw.args.slice() : DEFAULT_ARGS.slice(),
     env,
-    default: raw.default === true
+    default: raw.default === true,
+    quickplay: quickplay(id, raw.quickplay)
   };
+}
+
+function quickplay(id, raw) {
+  if (raw === undefined || raw === false) return null;
+  if (raw === true) return { seats: 4 };
+  if (raw && typeof raw === 'object' && (raw.seats === undefined || (Number.isInteger(raw.seats) && raw.seats > 0 && raw.seats <= 64))) {
+    return { seats: raw.seats || 4 };
+  }
+  throw new Error(`game "${id}": quickplay must be true or {"seats": 1-64}`);
 }
 
 // Load the descriptors. `legacy` is {version, game} from config.json/env, used only when no

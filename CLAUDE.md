@@ -35,7 +35,24 @@ Game server stdout events:
 {"event":"gameSpeed","data":2}
 {"event":"gameLength","data":1}
 {"event":"spectators","data":true}
+{"event":"gameMode","data":2}
 ```
+
+Only the events in `FIELDS` (Game.js) are read; anything else is logged and dropped. Platform
+events (P3): `public`, `humans`, `bots`, `joinable`, and
+`{"event":"join","data":{"sub":"g:12","name":"Ace"}}` / `{"event":"leave","data":{"sub":"g:12"}}`
+with the sub the server verified from the player token.
+
+Commands to the game server on stdin, one JSON line each (shikikan learns them in P4):
+```json
+{"cmd":"kick","data":{"sub":"g:12","reason":"..."}}
+{"cmd":"mute","data":{"sub":"g:12"}}
+{"cmd":"announce","data":{"text":"..."}}
+{"cmd":"close","data":{"reason":"..."}}
+{"cmd":"reserve","data":{"ticket":"<32 hex>","sub":"g:12","name":"Ace","expires":1793480000000}}
+```
+Every child also gets `ROUTER_GAME`, `ROUTER_MATCH_ID` and `ROUTER_PUBLIC` (1 for a Quick Play
+match, which fills empty seats with bots) in its environment.
 
 ### Secrets
 
@@ -63,4 +80,8 @@ ACCESS_KEY=your_key node server.js
 - `games.js` - The game descriptors: which games are served, each one's version gate and server launch command (`games.json`, `$GAMES_JSON`, or one game from `config.json`)
 - `Game.js` - Game process lifecycle, spawns the descriptor's server, parses NDJSON events
 - `challenge.js` - Proof-of-work challenge generation and verification (MD5)
+- `config.js` - Every setting: config.json (optional) with the environment on top
+- `playerTokens.js` - Yotis Online player tokens checked against the account service's JWKS
+- `bans.js` - The ban list from the account service, refreshed every 30 s
 - `config.example.json` - Template config (version, port, collectMetadata)
+- `test/` - `npm test`: the real router against stub game servers and a stub account service
