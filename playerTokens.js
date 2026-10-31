@@ -32,18 +32,27 @@ function verify(token, jwks, now = Math.floor(Date.now() / 1000)) {
 // Quick Play does not seat.
 const PLAYER_SUB = /^[ug]:[1-9][0-9]{0,9}$/;
 
+// The soonest a token naming an unknown key fetches the set again (JWKS_REFETCH_MS for tests).
+const REFETCH_MS = process.env.JWKS_REFETCH_MS !== undefined ? Number(process.env.JWKS_REFETCH_MS) : 10000;
+
 function createPlayerTokens(accountApi) {
   if (!accountApi) return null;
   let cached = null;
   let fetchedAt = 0;
+  // Called with the new key set whenever it changes: every live match verifies tokens itself
+  // (shikikan, ROUTER_JWKS) and is sent the new set.
+  const listeners = [];
   async function keys(force) {
     const age = Date.now() - fetchedAt;
-    if (cached && (force ? age < 10000 : age < 300000)) return cached;
+    if (cached && (force ? age < REFETCH_MS : age < 300000)) return cached;
     try {
       const response = await fetch(new URL('/api/.well-known/jwks', accountApi), { signal: AbortSignal.timeout(5000) });
       if (!response.ok) throw new Error('JWKS ' + response.status);
-      cached = await response.json();
+      const fresh = await response.json();
+      const changed = cached && JSON.stringify(fresh) !== JSON.stringify(cached);
+      cached = fresh;
       fetchedAt = Date.now();
+      if (changed) for (const listener of listeners) listener(cached);
     } catch (err) {
       console.error('Could not fetch the player token key set: ' + err.message);
       if (!cached) return null;
@@ -72,7 +81,7 @@ function createPlayerTokens(accountApi) {
     if (!PLAYER_SUB.test(claims.sub)) return { status: 403, message: 'Only players can use Quick Play.' };
     return { claims };
   }
-  return { check, keys };
+  return { check, keys, onChange: (listener) => listeners.push(listener) };
 }
 
 module.exports = { createPlayerTokens, verify, ISSUER, PLAYER_SUB };

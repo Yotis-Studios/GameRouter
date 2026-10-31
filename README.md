@@ -103,7 +103,9 @@ and every existing client works unchanged either way.
 | `ADMIN_PORT`, `ADMIN_HOST` | The admin API's own listener; `ADMIN_HOST` defaults to `127.0.0.1`. Never put it behind the public proxy. |
 
 The listing gains `id` (the match id), `public`, `humans`, `bots` and `joinable`; every old
-field is unchanged.
+field is unchanged. Each match is given the player token key set (`ROUTER_JWKS`) so its server
+verifies players itself, and is sent the new set when the account service rotates it. Players'
+reports (with the chat lines the server kept) show in the admin API's match details.
 
 ### Quick Play
 

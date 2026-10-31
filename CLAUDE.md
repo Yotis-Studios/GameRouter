@@ -50,9 +50,15 @@ Commands to the game server on stdin, one JSON line each (shikikan learns them i
 {"cmd":"announce","data":{"text":"..."}}
 {"cmd":"close","data":{"reason":"..."}}
 {"cmd":"reserve","data":{"ticket":"<32 hex>","sub":"g:12","name":"Ace","expires":1793480000000}}
+{"cmd":"jwks","data":{"keys":[...]}}
 ```
-Every child also gets `ROUTER_GAME`, `ROUTER_MATCH_ID` and `ROUTER_PUBLIC` (1 for a Quick Play
-match, which fills empty seats with bots) in its environment.
+Every child also gets `ROUTER_GAME`, `ROUTER_MATCH_ID`, `ROUTER_PUBLIC` (1 for a Quick Play
+match, which fills empty seats with bots) and `ROUTER_JWKS` (the player token key set, which the
+server verifies tokens with; `jwks` sends a new one) in its environment.
+
+`{"event":"report","data":{reporter, reporter_name, reported, reported_name, reason, lines}}` is a
+player's report with the chat lines the server kept; the router keeps the last 50 per match in the
+admin API until the account service takes them (P5).
 
 ### Secrets
 

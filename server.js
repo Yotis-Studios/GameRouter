@@ -54,6 +54,19 @@ const Game = require('./Game');
 const playerTokens = createPlayerTokens(config.accountApi);
 const bans = new BanCache({ accountApi: config.accountApi, serviceKey: config.serviceKey, refreshMs: config.banRefreshMs });
 
+// The key set every match verifies its players' tokens with (shikikan, P4): given to each match
+// as it is spawned, sent to the live ones when it changes, and looked at every five minutes so a
+// rotation reaches them without waiting for a Quick Play request.
+async function currentKeys() {
+  return playerTokens ? playerTokens.keys(false) : null;
+}
+if (playerTokens) {
+  playerTokens.onChange((keys) => {
+    for (const game of allGames) game.send('jwks', keys);
+  });
+  setInterval(() => playerTokens.keys(false), 300000).unref();
+}
+
 // WHICH GAMES THIS ROUTER SERVES -- see games.js. With no games.json and no $GAMES_JSON this
 // is one game built from the version above, named by config.json's "game" (default
 // "raifuwars"), and every route behaves exactly as it did before descriptors existed.
@@ -323,7 +336,7 @@ app.post('/challenge', (req, res) => {
 });
 
 // host a raifu wars game
-app.post('/games', (req, res) => {
+app.post('/games', async (req, res) => {
   if (!req.body) {
     res.status(400);
     res.send('Body required.');
@@ -333,6 +346,9 @@ app.post('/games', (req, res) => {
   // Which game to spawn, before the proof of work is checked: the constant is per game.
   const which = gameFor(req, res);
   if (!which) return;
+  // Before every check below, not between them and the spawn: from here to track() nothing
+  // waits, so a burst cannot all pass the per-IP and capacity checks at once.
+  const jwks = await currentKeys();
   // Check the user's proof of work before hosting new game
   const pow = req.body.pow;
   if (pow) {
@@ -373,7 +389,7 @@ app.post('/games', (req, res) => {
 
   const host = req.body.host;// : 'Unknown';
   const name = req.body.name;// : 'Raifu Wars Match';
-  const newGame = new Game(name, host, req.ip, which);
+  const newGame = new Game(name, host, req.ip, which, { jwks });
   track(newGame);
   // The HTTP response is normally sent from the 'port' handler below. If the
   // game process exits before ever reporting a port (e.g. it crashed, or
@@ -445,6 +461,10 @@ app.post('/quickplay', express.json({ limit: '1kb' }), async (req, res) => {
   recent.push(Date.now());
   quickPlayRecent.set(sub, recent);
 
+  // The last wait: from here to the reservation nothing yields, so two requests cannot both
+  // find no seat and start a match each.
+  const jwks = await currentKeys();
+
   // One seat per player: a new request replaces any seat still held for them.
   for (const game of allGames) {
     for (const [ticket, r] of game.reservations) if (r.sub === sub) game.reservations.delete(ticket);
@@ -460,7 +480,7 @@ app.post('/quickplay', express.json({ limit: '1kb' }), async (req, res) => {
       return res.status(503).json({ error: 'Server is at capacity. Please try again later.' });
     }
     console.log(`Starting a ${which.id} Quick Play match for ${sub} (${allGames.length + 1}/${maxGames()})`);
-    match = new Game('Quick Play', 'Yotis Online', req.ip, which, { public: true, numPlayers: which.quickplay.seats });
+    match = new Game('Quick Play', 'Yotis Online', req.ip, which, { public: true, numPlayers: which.quickplay.seats, jwks });
     match.quickPlay = true;
     track(match);
   }

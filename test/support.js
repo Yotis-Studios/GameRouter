@@ -29,14 +29,19 @@ function freePort() {
 
 // The account service: /api/.well-known/jwks and /internal/bans, and a signer for tokens.
 async function accountService(t) {
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
-  const jwk = publicKey.export({ format: 'jwk' });
-  const kid = 'test-key';
+  let { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+  let kid = 'test-key';
   const state = { bans: [], banRequests: 0 };
+  state.jwks = () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid, alg: 'EdDSA', use: 'sig' }] });
+  // A new signing key, as when the account service rotates it.
+  state.rotate = () => {
+    ({ privateKey, publicKey } = crypto.generateKeyPairSync('ed25519'));
+    kid = 'test-key-' + crypto.randomBytes(4).toString('hex');
+  };
   const server = http.createServer((req, res) => {
     if (req.url === '/api/.well-known/jwks') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ keys: [{ ...jwk, kid, alg: 'EdDSA', use: 'sig' }] }));
+      return res.end(JSON.stringify(state.jwks()));
     }
     if (req.url === '/internal/bans' && req.headers['x-service-key'] === SERVICE_KEY) {
       state.banRequests++;
@@ -50,7 +55,8 @@ async function accountService(t) {
   t.after(() => new Promise((r) => server.close(r)));
   const b64 = (v) => Buffer.from(JSON.stringify(v)).toString('base64url');
   state.url = 'http://127.0.0.1:' + server.address().port;
-  state.token = (claims, { key = privateKey, exp } = {}) => {
+  state.token = (claims, { key, exp } = {}) => {
+    key = key || privateKey;
     const now = Math.floor(Date.now() / 1000);
     const input = b64({ alg: 'EdDSA', typ: 'JWT', kid }) + '.' + b64({ iss: 'yotisonline', kind: claims.sub && claims.sub[0] === 'u' ? 'user' : 'guest', name: 'Pilot', iat: now, exp: exp || now + 3600, ...claims });
     return input + '.' + crypto.sign(null, Buffer.from(input), key).toString('base64url');
@@ -78,7 +84,7 @@ async function router(t, { games, env = {}, account } = {}) {
       COLLECT_METADATA: '1',
       GAMES_JSON: JSON.stringify(descriptors),
       CLOSE_GRACE_MS: '300',
-      ...(account ? { ACCOUNT_API_URL: account.url, SERVICE_KEY, ADMIN_PORT: String(adminPort), BAN_REFRESH_MS: '200' } : {}),
+      ...(account ? { ACCOUNT_API_URL: account.url, SERVICE_KEY, ADMIN_PORT: String(adminPort), BAN_REFRESH_MS: '200', JWKS_REFETCH_MS: '0' } : {}),
       ...env
     },
     stdio: ['ignore', 'pipe', 'pipe']

@@ -17,7 +17,7 @@ test('hosting, listing and join codes work as every shipped client expects', asy
   assert.match(row.id, /^[0-9a-f]{16}$/);
   assert.equal((await r.call('/games/' + row.code)).body.port, port);
   const game = await drive(t, port);
-  assert.deepEqual(game.env, { ROUTER_GAME: 'stubgame', ROUTER_MATCH_ID: row.id, ROUTER_PUBLIC: '0' });
+  assert.deepEqual(game.env, { ROUTER_GAME: 'stubgame', ROUTER_MATCH_ID: row.id, ROUTER_PUBLIC: '0', ROUTER_JWKS: '' });
   game.say('players', 3); game.say('mapHash', 'a'.repeat(40)); game.say('mapName', 'Field'); game.say('isStarted', 1);
   await until(async () => (await r.call('/games')).body[0].isStarted === 1);
   const after = (await r.call('/games')).body[0];
@@ -208,6 +208,41 @@ test('The admin API: loopback listener, service key, matches, kick, announce, cl
   await drive(t, stubborn);
   await r.admin('/admin/matches/' + stubbornId + '/close', { method: 'POST' });
   await until(async () => (await r.call('/games?game=stubborn')).body.length === 0, 8000);
+});
+
+test('Every match gets the player token key set, and a new key reaches the live ones', async (t) => {
+  const account = await accountService(t);
+  const r = await router(t, { account, games: { stubgame: { default: true }, sky: { quickplay: true } } });
+  const hosted = Number((await r.host()).body);
+  const game = await drive(t, hosted);
+  assert.deepEqual(JSON.parse(game.env.ROUTER_JWKS), account.jwks(), 'a hosted match has it');
+  const qp = (await r.call('/quickplay?game=sky', { method: 'POST', headers: { Authorization: account.token({ sub: 'g:1' }) } })).body;
+  const quick = await drive(t, qp.port);
+  assert.deepEqual(JSON.parse(quick.env.ROUTER_JWKS), account.jwks(), 'and a Quick Play match');
+
+  account.rotate();
+  // A token under the new key makes the router fetch the set again.
+  assert.equal((await r.call('/quickplay?game=sky', { method: 'POST', headers: { Authorization: account.token({ sub: 'g:2' }) } })).status, 200);
+  for (const g of [game, quick]) {
+    await until(() => g.commands.some((c) => c.cmd === 'jwks'));
+    assert.deepEqual(g.commands.find((c) => c.cmd === 'jwks').data, account.jwks());
+  }
+});
+
+test('A player report reaches the admin API with the lines the server kept', async (t) => {
+  const account = await accountService(t);
+  const r = await router(t, { account });
+  const port = Number((await r.host()).body);
+  const game = await drive(t, port);
+  const id = (await r.call('/games')).body[0].id;
+  game.say('report', { reporter: 'nobody', reason: 'x' });
+  game.say('report', { match: 'm', game: 'stubgame', reporter: 'g:1', reporter_name: 'Ace', reported: 'g:2', reported_name: 'Bee', slot: 1, reason: 'rude',
+    lines: [{ at: 1, slot: 1, sub: 'g:2', name: 'Bee', text: 'you are bad' }] });
+  await until(async () => (await r.admin('/admin/matches/' + id)).body.reports.length === 1);
+  const report = (await r.admin('/admin/matches/' + id)).body.reports[0];
+  assert.equal(report.match, id, 'the router names the match, not the server');
+  assert.deepEqual([report.reporter, report.reported, report.reportedName, report.reason], ['g:1', 'g:2', 'Bee', 'rude']);
+  assert.deepEqual(report.lines, [{ at: 1, sub: 'g:2', name: 'Bee', text: 'you are bad' }]);
 });
 
 test('Without the platform settings the router runs as before', async (t) => {

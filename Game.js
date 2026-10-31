@@ -59,7 +59,8 @@ const KILL_GRACE_MS = 5000;
 
 class Game extends EventEmitter {
   // options.public: a match the router made public (Quick Play). options.numPlayers: its seats
-  // until the server reports them.
+  // until the server reports them. options.jwks: the player token key set, so the server can
+  // verify its players' tokens itself.
   constructor(name, host, ip, descriptor, options = {}) {
     super();
 
@@ -101,16 +102,21 @@ class Game extends EventEmitter {
     this.reservations = new Map();
     // Subs the match has been told to mute, so a refreshed ban list does not repeat it.
     this.muted = new Set();
+    // Reports its players made (the server attaches the chat lines), newest last, until the
+    // account service takes them (P5).
+    this.reports = [];
     this.closing = false;
 
     this.process = spawn(descriptor.bin, descriptor.args, {
       cwd: descriptor.serverDir,
-      // ROUTER_* tell the server which match it is, and whether the router made it public (it
-      // then fills empty seats with bots and takes Quick Play players).
+      // ROUTER_* tell the server which match it is, whether the router made it public (it then
+      // fills empty seats with bots and takes Quick Play players), and the key set its players'
+      // tokens are signed with.
       env: Object.assign({}, process.env, descriptor.env, {
         ROUTER_GAME: this.game,
         ROUTER_MATCH_ID: this.id,
-        ROUTER_PUBLIC: this.public ? '1' : '0'
+        ROUTER_PUBLIC: this.public ? '1' : '0',
+        ROUTER_JWKS: options.jwks ? JSON.stringify(options.jwks) : ''
       }),
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -224,6 +230,37 @@ class Game extends EventEmitter {
         this.muted.delete(sub);
       }
       this.emit(event, sub);
+      return;
+    }
+
+    // A player's report: who, about whom, why, and the chat lines the server kept.
+    if (event === 'report') {
+      const r = value && typeof value === 'object' ? value : null;
+      if (!r || !SUB.test(r.reporter) || typeof r.reason !== 'string') {
+        console.error(`(${this.port}): report without a valid reporter, ignored`);
+        return;
+      }
+      const lines = Array.isArray(r.lines) ? r.lines.slice(-30).map((l) => ({
+        at: Number(l && l.at) || 0,
+        sub: l && SUB.test(l.sub) ? l.sub : null,
+        name: String((l && l.name) || '').slice(0, 32),
+        text: String((l && l.text) || '').slice(0, 500)
+      })) : [];
+      const report = {
+        match: this.id,
+        game: this.game,
+        reporter: r.reporter,
+        reporterName: String(r.reporter_name || '').slice(0, 32),
+        reported: SUB.test(r.reported) ? r.reported : null,
+        reportedName: String(r.reported_name || '').slice(0, 32),
+        reason: r.reason.slice(0, 200),
+        lines,
+        at: new Date().toISOString()
+      };
+      this.reports.push(report);
+      if (this.reports.length > 50) this.reports.shift();
+      console.log(`(${this.port}): ${report.reporter} reported ${report.reported || report.reportedName}: ${report.reason}`);
+      this.emit('report', report);
       return;
     }
 
@@ -342,7 +379,8 @@ class Game extends EventEmitter {
       uptime: Math.floor((now - this.timestamp) / 1000),
       closing: this.closing,
       roster: [...this.roster].map(([sub, p]) => ({ sub, name: p.name, joined: new Date(p.joined).toISOString(), muted: this.muted.has(sub) })),
-      reservations: [...this.reservations.values()].filter((r) => r.expires > now).map((r) => ({ sub: r.sub, expires: new Date(r.expires).toISOString() }))
+      reservations: [...this.reservations.values()].filter((r) => r.expires > now).map((r) => ({ sub: r.sub, expires: new Date(r.expires).toISOString() })),
+      reports: this.reports
     });
   }
 
