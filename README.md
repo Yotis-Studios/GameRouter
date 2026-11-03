@@ -184,6 +184,12 @@ of the link). A release that fails preflight is installed but not activated. The
 a `serverDir` that is still a plain directory adopts it as `adopted-<timestamp>`; a move keeps the
 inode, so matches running from it carry on.
 
+A game whose server imports files beside it (a Ganbatte game's `server/` imports `../rules/`) is
+released as the whole game directory, with `--cwd server` so preflight starts where the router
+does; its serverDir stays `<link>/server`, which resolves through the link into the same release.
+Install strips group and other write permission from every file (a release packed on Windows
+arrives world-writable).
+
 What still needs a router restart: a change to the **router** itself, `games.json`, or the
 router's environment. Restart only while `/games` is empty: every match is a child of the router.
 

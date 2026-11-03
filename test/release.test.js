@@ -106,3 +106,31 @@ test('game-release.sh: adopt, deploy with preflight, refuse a bad release, roll 
   assert.ok(!fs.existsSync(path.join(rel, adopted)), res.out);
   assert.match(fs.readFileSync(path.join(rel, 'HISTORY'), 'utf8'), /adopt .*\n.*install v2/);
 });
+
+// A Ganbatte game: server/ imports ../rules/, so the release is the whole game directory and
+// preflight starts in server/. Packed on Windows, its files arrive world-writable.
+test('game-release.sh: --cwd preflights a subdirectory; install strips group and other write', { skip }, async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'release-cwd-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const src = fs.mkdtempSync(path.join(base, 'src-'));
+  fs.mkdirSync(path.join(src, 'server'));
+  fs.mkdirSync(path.join(src, 'rules'));
+  fs.writeFileSync(path.join(src, 'rules', 'port.js'), "module.exports = (p) => JSON.stringify({ event: 'port', data: p });");
+  fs.writeFileSync(path.join(src, 'server', 'server.js'),
+    "const line=require('../rules/port.js');const s=require('net').createServer().listen(0,'127.0.0.1',()=>console.log(line(s.address().port)));setInterval(()=>{},1000);");
+  for (const f of ['server/server.js', 'rules/port.js']) fs.chmodSync(path.join(src, f), 0o666);
+  const tar = spawnSync('tar', ['-czf', '-', '-C', src, '.']).stdout;
+  const link = path.join(base, 'game');
+
+  let res = tool(['deploy', link, 'v1', '--start', `${process.execPath} server.js`, '--timeout', '5'], tar);
+  assert.notEqual(res.code, 0, 'without --cwd there is no server.js at the top');
+  res = tool(['deploy', link, 'v2', '--cwd', 'server', '--start', `${process.execPath} server.js`, '--timeout', '5'], tar);
+  assert.equal(res.code, 0, res.out);
+  assert.equal(fs.readlinkSync(link), 'game.releases/v2');
+  assert.equal(fs.statSync(path.join(link, 'server', 'server.js')).mode & 0o022, 0, 'no group or other write');
+  assert.equal(fs.realpathSync(path.join(link, 'server')), path.join(fs.realpathSync(link + '.releases'), 'v2', 'server'));
+
+  res = tool(['preflight', link, 'v2', '--cwd', '../..']);
+  assert.notEqual(res.code, 0);
+  assert.match(res.out, /subdirectory of the release/);
+});

@@ -19,7 +19,7 @@
 #
 #   game-release.sh status   <link>
 #   game-release.sh install  <link> <name> [--owner user]      a .tar.gz of the release on stdin
-#   game-release.sh preflight <link> <name> [--start "cmd"] [--env K=V ...] [--timeout s]
+#   game-release.sh preflight <link> <name> [--start "cmd"] [--cwd subdir] [--env K=V ...] [--timeout s]
 #   game-release.sh activate <link> <name> [preflight options] [--no-preflight]
 #   game-release.sh deploy   <link> <name> [--owner user] [preflight options]   install+activate
 #   game-release.sh rollback <link>                            back to the release before this one
@@ -32,7 +32,13 @@
 # PREFLIGHT starts the release the way the router would (default `hemlock server.hml`, or
 # --start; --env adds environment such as a port range) and requires the {"event":"port"} line
 # within --timeout seconds (default 10) and that port listening. Activate refuses a release that
-# fails it unless --no-preflight.
+# fails it unless --no-preflight. --cwd starts it in a subdirectory of the release: a game whose
+# server imports files beside it (Ganbatte's `server/` imports `../rules/`) is released as the
+# whole game directory, and the router's serverDir is `<link>/server` -- it resolves through the
+# link, so `../rules` lands in the same release.
+#
+# Install strips group and other write permission: a release packed on Windows arrives 0666,
+# and nobody but its owner should be able to change code a game server runs.
 #
 # From a dev machine, the courier is ssh:
 #   git -C ~/Projects/shikikan.hml archive --format=tar.gz HEAD | \
@@ -49,7 +55,7 @@ CMD=$1; LINK=${2%/}; shift 2
 REL="$LINK.releases"
 NAME_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
 
-OWNER=""; START="hemlock server.hml"; TIMEOUT=10; KEEP=3; PREFLIGHT=1; ENVS=()
+OWNER=""; START="hemlock server.hml"; CWD=""; TIMEOUT=10; KEEP=3; PREFLIGHT=1; ENVS=()
 NAME=""
 if [[ "$CMD" =~ ^(install|preflight|activate|deploy)$ ]]; then
     [ $# -ge 1 ] || die "$CMD needs a release name"
@@ -60,6 +66,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --owner) OWNER=$2; shift 2 ;;
         --start) START=$2; shift 2 ;;
+        --cwd) CWD=$2; shift 2 ;;
         --env) [[ "$2" == *=* ]] || die "--env takes K=V"; ENVS+=("$2"); shift 2 ;;
         --timeout) TIMEOUT=$2; shift 2 ;;
         --keep) KEEP=$2; shift 2 ;;
@@ -112,6 +119,7 @@ do_install() {
     local tmp="$REL/.incoming-$NAME"
     rm -rf "$tmp"; mkdir -p "$tmp"
     tar -xzf - -C "$tmp" || { rm -rf "$tmp"; die "could not unpack the release from stdin"; }
+    chmod -R go-w "$tmp"
     [ -z "$OWNER" ] || chown -R "$OWNER:$(id -gn "$OWNER")" "$tmp"
     mv "$tmp" "$dst"
     history "install $NAME"
@@ -121,6 +129,10 @@ do_install() {
 do_preflight() {
     local dir="$REL/$NAME"
     [ -d "$dir" ] || die "no release $NAME in $REL"
+    if [ -n "$CWD" ]; then
+        [[ "$CWD" != /* && "$CWD" != *..* ]] || die "--cwd is a subdirectory of the release"
+        dir="$dir/$CWD"; [ -d "$dir" ] || die "release $NAME has no $CWD/"
+    fi
     local log; log=$(mktemp)
     local runas=()
     [ -z "$OWNER" ] || runas=(sudo -u "$OWNER")
