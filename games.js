@@ -21,7 +21,9 @@
 //              constant. Required.
 //   serverDir  where to spawn the server (cwd); a leading ~ is the home directory. Default:
 //              GAME_SERVER_DIR, then ../RaifuWarsServer.
-//   bin        the binary. Default: HEMLOCK_BIN, then "hemlock".
+//   bin        the binary. Default: HEMLOCK_BIN, then "hemlock". A relative path with a slash
+//              ("./px_server") is the release's own (a hemlockc build): it resolves against the
+//              match's cwd, so it switches with the release link.
 //   args       its arguments. Default: ["server.hml"].
 //   env        extra environment for the child, on top of this process's own.
 //   default    the game a request means when it names none. Exactly one game is the default:
