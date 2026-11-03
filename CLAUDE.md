@@ -91,3 +91,19 @@ ACCESS_KEY=your_key node server.js
 - `bans.js` - The ban list from the account service, refreshed every 30 s
 - `config.example.json` - Template config (version, port, collectMetadata)
 - `test/` - `npm test`: the real router against stub game servers and a stub account service
+- `tools/game-release.sh` - Deploys a game server as a new release behind the serverDir link
+
+## Deploying a game server: never restart the router for it
+
+Use `tools/game-release.sh` (README, "Deploying a game server"). A game's serverDir is a link to
+the current release; `deploy` installs a release (packed with its dependencies), preflights it,
+and switches the link. Running matches keep the release they started in (Game.js resolves the
+link per match), so there is nothing to wait for and no lobby to check first.
+
+- Never overwrite, delete or `mv` a release by hand: a live match may be running in it.
+  `status` shows which are live; `prune` deletes only releases nobody runs.
+- Never install dependencies on a production host: pack them into the release on a build box.
+- A failed preflight leaves the link where it was. Fix the release, deploy it under a new name.
+- `rollback` switches back to the previous release, the same way.
+- Restart the router only for a router, `games.json` or environment change, and only while
+  `/games` is empty: every match is a child process of the router and dies with it.

@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const fs = require('fs');
 const EventEmitter = require('events').EventEmitter;
 
 // The same setting server.js uses, environment included. getInfo() needs it to tell a joining
@@ -57,6 +58,15 @@ const KILL_GRACE_MS = 5000;
 // still apply: a wrong directory does not fail loudly, it fails as a game that never
 // reports a port, and a pm2-managed process has whatever PATH pm2 was started with.
 
+// WHICH RELEASE A MATCH RUNS. serverDir may be a symlink to the current release
+// (tools/game-release.sh: releases/<name>/ beside a `current` link). It is resolved once, when
+// the match starts, and the match runs in that directory for its whole life: switching the link
+// changes what the NEXT match runs, never a running one, so a game server deploys without
+// restarting the router or touching a live match. A plain directory resolves to itself.
+function resolveRelease(dir) {
+  try { return fs.realpathSync(dir); } catch { return dir; }
+}
+
 class Game extends EventEmitter {
   // options.public: a match the router made public (Quick Play). options.numPlayers: its seats
   // until the server reports them. options.jwks: the player token key set, so the server can
@@ -106,9 +116,11 @@ class Game extends EventEmitter {
     // account service takes them (P5).
     this.reports = [];
     this.closing = false;
+    // The directory this match runs in, the serverDir link resolved (see resolveRelease).
+    this.release = resolveRelease(descriptor.serverDir);
 
     this.process = spawn(descriptor.bin, descriptor.args, {
-      cwd: descriptor.serverDir,
+      cwd: this.release,
       // ROUTER_* tell the server which match it is, whether the router made it public (it then
       // fills empty seats with bots and takes Quick Play players), and the key set its players'
       // tokens are signed with.
@@ -186,7 +198,7 @@ class Game extends EventEmitter {
       // cause and effect are one entry rather than two files.
       if (this.port === '?') {
         console.error(`game server never reported a port (exit ${code}${signal ? ' signal ' + signal : ''})`);
-        console.error(`  game: ${this.game}   cwd: ${this.descriptor.serverDir}   bin: ${this.descriptor.bin} ${this.descriptor.args.join(' ')}`);
+        console.error(`  game: ${this.game}   cwd: ${this.release}   bin: ${this.descriptor.bin} ${this.descriptor.args.join(' ')}`);
         if (this._stderr.length) {
           for (const line of this._stderr) console.error(`  | ${line}`);
         } else {
@@ -376,6 +388,7 @@ class Game extends EventEmitter {
     return Object.assign(this.getInfo(), {
       ip: this.ip,
       pid: this.process.pid,
+      release: this.release,
       uptime: Math.floor((now - this.timestamp) / 1000),
       closing: this.closing,
       roster: [...this.roster].map(([sub, p]) => ({ sub, name: p.name, joined: new Date(p.joined).toISOString(), muted: this.muted.has(sub) })),

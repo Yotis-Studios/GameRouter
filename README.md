@@ -146,6 +146,47 @@ On `ADMIN_HOST:ADMIN_PORT`, every request with `X-Service-Key` (anything else is
 (`test/stub-game.js`) and a stub account service, on loopback. Nothing is written next to the
 router.
 
+## Deploying a game server (no router restart)
+
+A game server deploys by switching a link, not by restarting the router. A game's `serverDir`
+(or `GAME_SERVER_DIR`) is a symlink to the current release, with the releases beside it:
+
+```
+/home/server/shikikan            -> shikikan.releases/v0.3.4-09c5f44
+/home/server/shikikan.releases/
+    v0.3.3-5dbe7b7/              previous, kept for rollback
+    v0.3.4-09c5f44/
+    HISTORY                      every adopt, install, activate and prune, with who and when
+```
+
+The router resolves the link once per match, when it starts it, and the match runs in that
+directory until it ends. The admin API's `release` field says which. So switching the link
+changes what the **next** match runs: matches in progress finish on their own release, and the
+router keeps running. A release is only deleted by `prune`, and never while a process is running
+in it.
+
+`tools/game-release.sh` does all of it on the router host, as root:
+
+```bash
+# from a dev machine: pack the release WITH its dependencies (nothing is installed on the host)
+ssh build 'cd /tmp/rel && git -C ~/Projects/shikikan.hml archive HEAD | tar -x && hpm install && tar -czf - .' \
+  | ssh root@host /path/to/GameRouter/tools/game-release.sh deploy /home/server/shikikan v0.3.4-09c5f44 --owner server
+
+game-release.sh status   /home/server/shikikan                # releases, which is current, which are live
+game-release.sh rollback /home/server/shikikan                # back to the previous release
+game-release.sh prune    /home/server/shikikan --keep 3       # delete old releases nobody runs
+```
+
+`deploy` = `install` (unpack stdin into a new release; names are never reused) + `preflight`
+(start it as the router would, `hemlock server.hml` or `--start`, with `--env` for a port range,
+and require the `{"event":"port"}` line and that port listening) + `activate` (an atomic switch
+of the link). A release that fails preflight is installed but not activated. The first deploy on
+a `serverDir` that is still a plain directory adopts it as `adopted-<timestamp>`; a move keeps the
+inode, so matches running from it carry on.
+
+What still needs a router restart: a change to the **router** itself, `games.json`, or the
+router's environment. Restart only while `/games` is empty: every match is a child of the router.
+
 ## nginx Reverse Proxy
 
 To route all traffic through port 80 (recommended for players on mobile networks):
