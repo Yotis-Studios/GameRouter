@@ -84,10 +84,25 @@ launch command. Copy `games.example.json` to `games.json` (gitignored):
 run never writes on the host. With neither, the router serves one game from `config.json`'s
 `version`, named by its `game` field (default `raifuwars`), exactly as before.
 
+Games whose clients ship different proof-of-work keys can share a router: a descriptor's
+`accessKeyEnv` names the environment variable holding that game's key (the name, never the
+key -- the key goes in the env file with the other secrets). Without it a game uses
+`ACCESS_KEY`. Raifu Wars 1.14 and the Ganbatte games, for example:
+
+```json
+{
+    "raifuwars":      { "version": "v1.14.0", "default": true },
+    "biplane-battle": { "version": "v0.1.8", "accessKeyEnv": "ACCESS_KEY_GANBATTE", "...": "..." }
+}
+```
+
+with `ACCESS_KEY` and `ACCESS_KEY_GANBATTE` both in the environment. A game whose key is
+unset or empty stops the router from starting: an empty key would let any proof of work pass.
+
 ### Hosting a game
 
 1. `POST /challenge` to get a challenge number
-2. Find a `solution` such that `MD5(ACCESS_KEY + version + challenge + solution)` starts with `000`
+2. Find a `solution` such that `MD5(key + version + challenge + solution)` starts with `000`, where `key` is the game's key (`ACCESS_KEY`, or its `accessKeyEnv`)
 3. `POST /games` with body `pow=<solution>&host=<name>&name=<lobby_name>` (and `&game=<id>` for a game other than the default)
 4. Response is the game server port (or WebSocket path in nginx mode)
 

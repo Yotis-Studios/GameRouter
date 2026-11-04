@@ -63,7 +63,9 @@ admin API until the account service takes them (P5).
 ### Secrets
 
 Secrets are loaded from environment variables, never committed to the repo:
-- `ACCESS_KEY` - PoW challenge salt (combined with version string)
+- `ACCESS_KEY` - PoW challenge salt (combined with version string). A game whose clients ship
+  a different key names its own variable with `accessKeyEnv` in its descriptor; a game left
+  with an unset or empty key stops the router from starting.
 - `DISCORD_WEBHOOK` - Optional Discord webhook URL for notifications
 
 Non-sensitive config lives in `config.json` (gitignored, create from `config.example.json`).

@@ -131,11 +131,12 @@ async function router(t, { games, env = {}, account } = {}) {
     admin: (p, o = {}) => call(adminBase + p, { ...o, headers: { 'X-Service-Key': SERVICE_KEY, ...(o.headers || {}) } }),
     adminRaw: (p, o) => call(adminBase + p, o),
     // Host a game the way every shipped client does: challenge, proof of work, POST /games.
-    async host(fields = {}) {
+    // `key` is the proof-of-work key the client ships (default: the router's ACCESS_KEY).
+    async host(fields = {}, { key = ACCESS_KEY } = {}) {
       const challenge = (await call(base + '/challenge', { method: 'POST' })).body;
       const version = (await call(base + '/version' + (fields.game ? '?game=' + fields.game : ''))).body;
       let solution = 0;
-      while (!md5(ACCESS_KEY + version + challenge + solution).startsWith('000')) solution++;
+      while (!md5(key + version + challenge + solution).startsWith('000')) solution++;
       return call(base + '/games', { method: 'POST', form: { pow: String(solution), host: 'Tester', name: 'Test Lobby', ...fields } });
     }
   };
@@ -170,4 +171,24 @@ async function until(fn, ms = 3000, describe) {
   }
 }
 
-module.exports = { accountService, router, drive, until, SERVICE_KEY };
+// A router that is expected NOT to start: resolves with its exit code and log once it exits.
+function routerExit(t, { games, env = {} } = {}) {
+  const descriptors = {};
+  for (const [id, d] of Object.entries(games || { stubgame: { default: true } })) {
+    descriptors[id] = { version: 'v-test', bin: process.execPath, args: [STUB], serverDir: os.tmpdir(), ...d };
+  }
+  const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
+    cwd: os.tmpdir(),
+    env: { ...process.env, PORT: '0', VERSION: 'v-test', ACCESS_KEY, NGINX: '0', COLLECT_METADATA: '0',
+      GAMES_JSON: JSON.stringify(descriptors), ...env },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const log = [];
+  child.stdout.on('data', (b) => log.push(String(b)));
+  child.stderr.on('data', (b) => log.push(String(b)));
+  const timer = setTimeout(() => child.kill(), 10000);
+  t.after(() => { clearTimeout(timer); child.kill(); });
+  return new Promise((resolve) => child.on('exit', (code) => { clearTimeout(timer); resolve({ code, log: log.join('') }); }));
+}
+
+module.exports = { accountService, router, routerExit, drive, until, SERVICE_KEY, ACCESS_KEY };

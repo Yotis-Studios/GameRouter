@@ -31,6 +31,15 @@
 //   quickplay  offer POST /quickplay for this game: true, or {"seats": n} for the seats a new
 //              Quick Play match has until its server reports numPlayers (default 4). Needs
 //              ACCOUNT_API_URL (player tokens). Off by default.
+//   accessKeyEnv  the NAME of the environment variable holding this game's proof-of-work key
+//              ("ACCESS_KEY_GANBATTE"), for a game whose clients ship a different key from
+//              ACCESS_KEY. Default: ACCESS_KEY. The name, never the key: games.json is config and
+//              the key belongs in the env file beside the other secrets.
+//
+// EVERY GAME MUST END UP WITH A KEY. A game whose key is unset or empty refuses to load, so the
+// router does not start: with an empty key the constant is the version alone, and any proof of
+// work against it passes -- staging ran like that for three minutes on 2026-11-04 after an env
+// edit wrote ACCESS_KEY= with nothing after it, and nothing said so.
 //
 // WHERE IT COMES FROM, in order:
 //
@@ -75,6 +84,13 @@ function normalise(id, raw) {
   for (const k of Object.keys(env)) {
     if (typeof env[k] !== 'string') throw new Error(`game "${id}": env.${k} must be a string`);
   }
+  const accessKeyEnv = raw.accessKeyEnv === undefined ? 'ACCESS_KEY' : raw.accessKeyEnv;
+  if (typeof accessKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/.test(accessKeyEnv)) {
+    throw new Error(`game "${id}": accessKeyEnv must be an environment variable name (A-Z, 0-9, _)`);
+  }
+  if (!process.env[accessKeyEnv]) {
+    throw new Error(`game "${id}": no proof-of-work key -- ${accessKeyEnv} is unset or empty`);
+  }
   return {
     id,
     version: raw.version,
@@ -83,8 +99,15 @@ function normalise(id, raw) {
     args: Array.isArray(raw.args) ? raw.args.slice() : DEFAULT_ARGS.slice(),
     env,
     default: raw.default === true,
-    quickplay: quickplay(id, raw.quickplay)
+    quickplay: quickplay(id, raw.quickplay),
+    accessKeyEnv
   };
+}
+
+// The proof-of-work key for a game, read when it is needed rather than kept on the descriptor,
+// so the descriptor can be logged whole without the key in it.
+function accessKeyFor(game) {
+  return process.env[game.accessKeyEnv];
 }
 
 function quickplay(id, raw) {
@@ -138,4 +161,4 @@ function resolveGame(catalogue, named) {
   return catalogue.games[named] || null;
 }
 
-module.exports = { loadGames, resolveGame };
+module.exports = { loadGames, resolveGame, accessKeyFor };

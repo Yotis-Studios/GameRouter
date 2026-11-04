@@ -39,12 +39,11 @@ if (trustLoopbackProxy) {
   app.set('trust proxy', 'loopback');
 }
 
-const accessKey = process.env.ACCESS_KEY;
 const discordHook = process.env.DISCORD_WEBHOOK;
 
 const { generateChallenge, testSolution } = require('./challenge.js');
 const { generateCode, normalise: normaliseCode } = require('./code.js');
-const { loadGames, resolveGame } = require('./games.js');
+const { loadGames, resolveGame, accessKeyFor } = require('./games.js');
 const { createPlayerTokens } = require('./playerTokens.js');
 const { BanCache } = require('./bans.js');
 const Game = require('./Game');
@@ -385,7 +384,8 @@ app.post('/games', async (req, res) => {
     const stored = challenges[req.ip];
     const challenge = stored && stored.expires > Date.now() ? stored.value : undefined;
     delete challenges[req.ip];
-    const challengeConstant = accessKey + which.version;
+    // Per game: two games' clients may ship different keys (games.js, accessKeyEnv).
+    const challengeConstant = accessKeyFor(which) + which.version;
     if (!testSolution(challengeConstant, challenge, pow)) {
       res.status(401);
       res.send('Authentication failed.');
@@ -602,7 +602,7 @@ app.listen(port, () => {
   for (const id of Object.keys(catalogue.games)) {
     const g = catalogue.games[id];
     const extra = Object.keys(g.env).map((k) => `${k}=${g.env[k]}`).join(' ');
-    console.log(`  ${id} ${g.version}${g.default ? ' (default)' : ''}${g.quickplay ? ' (Quick Play)' : ''}: ${g.bin} ${g.args.join(' ')} in ${g.serverDir}${extra ? '  ' + extra : ''}`);
+    console.log(`  ${id} ${g.version}${g.default ? ' (default)' : ''}${g.quickplay ? ' (Quick Play)' : ''}${g.accessKeyEnv !== 'ACCESS_KEY' ? ' (key from ' + g.accessKeyEnv + ')' : ''}: ${g.bin} ${g.args.join(' ')} in ${g.serverDir}${extra ? '  ' + extra : ''}`);
   }
   console.log(`Yotis Online: ${playerTokens ? 'player tokens from ' + config.accountApi : 'no player tokens (Quick Play off)'}; ${bans.enabled ? 'bans refreshed every ' + config.banRefreshMs + ' ms' : 'no ban list'}`);
 });

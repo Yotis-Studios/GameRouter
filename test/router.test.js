@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { accountService, router, drive, until } = require('./support');
+const { accountService, router, routerExit, drive, until, ACCESS_KEY } = require('./support');
 
 test('hosting, listing and join codes work as every shipped client expects', async (t) => {
   const r = await router(t);
@@ -255,4 +255,30 @@ test('Without the platform settings the router runs as before', async (t) => {
   assert.ok(r.log.some((l) => l.includes('no player tokens (Quick Play off)')));
   assert.equal((await r.call('/quickplay', { method: 'POST' })).status, 503);
   assert.equal((await r.host()).status, 200);
+});
+
+test('Each game checks proof of work against its own key, and the key is never logged', async (t) => {
+  const r = await router(t, {
+    games: { rw: { default: true }, sky: { accessKeyEnv: 'ACCESS_KEY_SKY' } },
+    env: { ACCESS_KEY_SKY: 'sky-client-key' }
+  });
+  // A shipped client of the default game: names no game, ships ACCESS_KEY.
+  assert.equal((await r.host()).status, 200);
+  assert.equal((await r.host({}, { key: 'sky-client-key' })).status, 401, "the other game's key does not host the default game");
+  assert.equal((await r.host({ game: 'sky' }, { key: 'sky-client-key' })).status, 200);
+  assert.equal((await r.host({ game: 'sky' })).status, 401, 'ACCESS_KEY does not host a game with its own key');
+  assert.ok(r.log.some((l) => l.includes('sky v-test') && l.includes('(key from ACCESS_KEY_SKY)')));
+  assert.ok(!r.log.some((l) => l.includes('sky-client-key') || l.includes(ACCESS_KEY)), 'no key in the log');
+});
+
+test('A game with no proof-of-work key keeps the router from starting', async (t) => {
+  const empty = await routerExit(t, { env: { ACCESS_KEY: '' } });
+  assert.notEqual(empty.code, 0);
+  assert.match(empty.log, /game "stubgame": no proof-of-work key -- ACCESS_KEY is unset or empty/);
+  const unset = await routerExit(t, { games: { sky: { accessKeyEnv: 'ACCESS_KEY_NOT_SET_ANYWHERE' } } });
+  assert.notEqual(unset.code, 0);
+  assert.match(unset.log, /ACCESS_KEY_NOT_SET_ANYWHERE is unset or empty/);
+  const bad = await routerExit(t, { games: { sky: { accessKeyEnv: 'the key itself?' } } });
+  assert.notEqual(bad.code, 0);
+  assert.match(bad.log, /accessKeyEnv must be an environment variable name/);
 });
