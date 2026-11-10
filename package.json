@@ -26,5 +26,8 @@
     "eslint-config-airbnb-base": "^15.0.0",
     "eslint-plugin-import": "^2.26.0",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "encoding": "0.1.13"
   }
 }
