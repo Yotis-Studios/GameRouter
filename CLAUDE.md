@@ -82,6 +82,10 @@ npm install
 ACCESS_KEY=your_key node server.js
 ```
 
+`npm run typecheck` type-checks every file with TypeScript (`jsconfig.json`, `checkJs`) without
+converting anything: types are JSDoc comments where inference falls short. Keep it at zero errors,
+and run `npm test` too.
+
 ## Files
 
 - `server.js` - Express HTTP server, routes, rate limiting, SQLite metadata
