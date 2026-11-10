@@ -23,7 +23,8 @@ const server = net.createServer((socket) => {
   socket.on('error', () => {});
   const env = {};
   for (const k of Object.keys(process.env)) if (k.startsWith('ROUTER_')) env[k] = process.env[k];
-  socket.write(JSON.stringify({ env }) + '\n');
+  const keys = Object.keys(process.env).filter((k) => k.startsWith('ACCESS_KEY'));
+  socket.write(JSON.stringify({ env, keys }) + '\n');
   for (const c of commands) socket.write(c + '\n');
   readline.createInterface({ input: socket }).on('line', (line) => process.stdout.write(line + '\n')).on('error', () => {});
 });

@@ -88,9 +88,16 @@ function normalise(id, raw) {
   if (typeof accessKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/.test(accessKeyEnv)) {
     throw new Error(`game "${id}": accessKeyEnv must be an environment variable name (A-Z, 0-9, _)`);
   }
-  if (!process.env[accessKeyEnv]) {
+  const key = process.env[accessKeyEnv];
+  if (!key || !key.trim()) {
     throw new Error(`game "${id}": no proof-of-work key -- ${accessKeyEnv} is unset or empty`);
   }
+  // A CRLF env file leaves a carriage return on the key: no shipped client solves against that,
+  // so say so at startup.
+  if (key !== key.trim()) {
+    throw new Error(`game "${id}": ${accessKeyEnv} has whitespace or a line ending around it`);
+  }
+  keyEnvs.add(accessKeyEnv);
   return {
     id,
     version: raw.version,
@@ -102,6 +109,17 @@ function normalise(id, raw) {
     quickplay: quickplay(id, raw.quickplay),
     accessKeyEnv
   };
+}
+
+// Every variable a game's proof-of-work key came from. Game servers are started without them:
+// a match has no use for a key, and one game's server never sees another game's.
+const keyEnvs = new Set();
+
+// The environment without any proof-of-work key in it.
+function withoutKeys(env) {
+  const out = { ...env };
+  for (const k of keyEnvs) delete out[k];
+  return out;
 }
 
 // The proof-of-work key for a game, read when it is needed rather than kept on the descriptor,
@@ -161,4 +179,4 @@ function resolveGame(catalogue, named) {
   return catalogue.games[named] || null;
 }
 
-module.exports = { loadGames, resolveGame, accessKeyFor };
+module.exports = { loadGames, resolveGame, accessKeyFor, withoutKeys };

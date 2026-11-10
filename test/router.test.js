@@ -263,12 +263,19 @@ test('Each game checks proof of work against its own key, and the key is never l
     env: { ACCESS_KEY_SKY: 'sky-client-key' }
   });
   // A shipped client of the default game: names no game, ships ACCESS_KEY.
-  assert.equal((await r.host()).status, 200);
+  const rwHosted = await r.host();
+  assert.equal(rwHosted.status, 200);
   assert.equal((await r.host({}, { key: 'sky-client-key' })).status, 401, "the other game's key does not host the default game");
-  assert.equal((await r.host({ game: 'sky' }, { key: 'sky-client-key' })).status, 200);
+  const skyHosted = await r.host({ game: 'sky' }, { key: 'sky-client-key' });
+  assert.equal(skyHosted.status, 200);
   assert.equal((await r.host({ game: 'sky' })).status, 401, 'ACCESS_KEY does not host a game with its own key');
   assert.ok(r.log.some((l) => l.includes('sky v-test') && l.includes('(key from ACCESS_KEY_SKY)')));
   assert.ok(!r.log.some((l) => l.includes('sky-client-key') || l.includes(ACCESS_KEY)), 'no key in the log');
+  // Neither game's server is started with a key, its own or the other game's.
+  const rw = await drive(t, Number(rwHosted.body));
+  const sky = await drive(t, Number(skyHosted.body));
+  assert.deepEqual(rw.keys, []);
+  assert.deepEqual(sky.keys, []);
 });
 
 test('A game with no proof-of-work key keeps the router from starting', async (t) => {
@@ -278,6 +285,17 @@ test('A game with no proof-of-work key keeps the router from starting', async (t
   const unset = await routerExit(t, { games: { sky: { accessKeyEnv: 'ACCESS_KEY_NOT_SET_ANYWHERE' } } });
   assert.notEqual(unset.code, 0);
   assert.match(unset.log, /ACCESS_KEY_NOT_SET_ANYWHERE is unset or empty/);
+  const blank = await routerExit(t, { env: { ACCESS_KEY: '   ' } });
+  assert.notEqual(blank.code, 0);
+  assert.match(blank.log, /ACCESS_KEY is unset or empty/);
+  const crlf = await routerExit(t, { env: { ACCESS_KEY: 'test-access-key\r' } });
+  assert.notEqual(crlf.code, 0);
+  assert.match(crlf.log, /ACCESS_KEY has whitespace or a line ending around it/);
+  assert.ok(!crlf.log.includes('test-access-key'), 'no key in the log');
+  // One game from config.json (no games.json) is held to the same rule.
+  const legacy = await routerExit(t, { env: { ACCESS_KEY: '', GAMES_JSON: '' } });
+  assert.notEqual(legacy.code, 0);
+  assert.match(legacy.log, /no proof-of-work key -- ACCESS_KEY is unset or empty/);
   const bad = await routerExit(t, { games: { sky: { accessKeyEnv: 'the key itself?' } } });
   assert.notEqual(bad.code, 0);
   assert.match(bad.log, /accessKeyEnv must be an environment variable name/);

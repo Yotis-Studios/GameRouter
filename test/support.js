@@ -164,6 +164,8 @@ async function drive(t, port) {
   await until(() => lines.length > 0);
   return {
     env: lines[0].env,
+    // The ACCESS_KEY* variables the server was started with (names only).
+    keys: lines[0].keys,
     get commands() { return lines.slice(1); },
     say: (event, data) => socket.write(JSON.stringify({ event, data }) + '\n'),
     raw: (line) => socket.write(line + '\n')

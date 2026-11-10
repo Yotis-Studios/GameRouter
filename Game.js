@@ -6,6 +6,7 @@ const EventEmitter = require('events').EventEmitter;
 // The same setting server.js uses, environment included. getInfo() needs it to tell a joining
 // client how to reach a lobby -- see the note there.
 const { nginx } = require('./config');
+const { withoutKeys } = require('./games');
 
 // THE EVENTS A GAME SERVER MAY REPORT, and how each value is read. Anything else is logged and
 // dropped.
@@ -123,8 +124,8 @@ class Game extends EventEmitter {
       cwd: this.release,
       // ROUTER_* tell the server which match it is, whether the router made it public (it then
       // fills empty seats with bots and takes Quick Play players), and the key set its players'
-      // tokens are signed with.
-      env: Object.assign({}, process.env, descriptor.env, {
+      // tokens are signed with. No proof-of-work key reaches a game server (games.js).
+      env: Object.assign(withoutKeys(process.env), descriptor.env, {
         ROUTER_GAME: this.game,
         ROUTER_MATCH_ID: this.id,
         ROUTER_PUBLIC: this.public ? '1' : '0',
