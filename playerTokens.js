@@ -18,12 +18,12 @@ const ISSUER = 'yotisonline';
 function verify(token, jwks, now = Math.floor(Date.now() / 1000)) {
   const parts = typeof token === 'string' ? token.split('.') : [];
   if (parts.length !== 3) throw new Error('Malformed token');
-  const header = JSON.parse(Buffer.from(parts[0], 'base64url'));
+  const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
   const key = header.alg === 'EdDSA' && jwks.keys.find((k) => k.kid === header.kid && k.crv === 'Ed25519');
   if (!key) throw Object.assign(new Error('Unknown key'), { unknownKey: true });
   const publicKey = crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: key.x }, format: 'jwk' });
   if (!crypto.verify(null, Buffer.from(parts[0] + '.' + parts[1]), publicKey, Buffer.from(parts[2], 'base64url'))) throw new Error('Bad signature');
-  const claims = JSON.parse(Buffer.from(parts[1], 'base64url'));
+  const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
   if (claims.iss !== ISSUER || typeof claims.sub !== 'string' || !(claims.exp > now)) throw new Error('Expired or foreign token');
   return claims;
 }

@@ -21,7 +21,7 @@ const SERVICE_KEY = 'test-service-key-0123456789abcdef';
 function freePort() {
   return new Promise((resolve) => {
     const s = net.createServer().listen(0, '127.0.0.1', () => {
-      const { port } = s.address();
+      const { port } = /** @type {net.AddressInfo} */ (s.address());
       s.close(() => resolve(port));
     });
   });
@@ -31,6 +31,7 @@ function freePort() {
 async function accountService(t) {
   let { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
   let kid = 'test-key';
+  /** @type {any} */
   const state = { bans: [], banRequests: 0, reports: [] };
   state.jwks = () => ({ keys: [{ ...publicKey.export({ format: 'jwk' }), kid, alg: 'EdDSA', use: 'sig' }] });
   // A new signing key, as when the account service rotates it.
@@ -64,8 +65,8 @@ async function accountService(t) {
   await new Promise((r) => server.once('listening', r));
   t.after(() => new Promise((r) => server.close(r)));
   const b64 = (v) => Buffer.from(JSON.stringify(v)).toString('base64url');
-  state.url = 'http://127.0.0.1:' + server.address().port;
-  state.token = (claims, { key, exp } = {}) => {
+  state.url = 'http://127.0.0.1:' + /** @type {net.AddressInfo} */ (server.address()).port;
+  state.token = (claims, /** @type {{ key?: crypto.KeyObject, exp?: number }} */ { key, exp } = {}) => {
     key = key || privateKey;
     const now = Math.floor(Date.now() / 1000);
     const input = b64({ alg: 'EdDSA', typ: 'JWT', kid }) + '.' + b64({ iss: 'yotisonline', kind: claims.sub && claims.sub[0] === 'u' ? 'user' : 'guest', name: 'Pilot', iat: now, exp: exp || now + 3600, ...claims });
@@ -75,7 +76,7 @@ async function accountService(t) {
 }
 
 // The router, with `games` as its descriptors (stub servers unless a descriptor says otherwise).
-async function router(t, { games, env = {}, account } = {}) {
+async function router(t, /** @type {{ games?: object, env?: object, account?: any }} */ { games, env = {}, account } = {}) {
   const port = await freePort();
   const adminPort = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gamerouter-test-'));
@@ -114,12 +115,19 @@ async function router(t, { games, env = {}, account } = {}) {
   if (account) await until(() => log.some((l) => l.startsWith('Admin API on')), 5000, () => log.join('\n'));
   const base = 'http://127.0.0.1:' + port;
   const adminBase = 'http://127.0.0.1:' + adminPort;
+  /**
+   * @param {string} url
+   * @param {{ method?: string, form?: Record<string, string>, json?: any, headers?: Record<string, string> }} [opts]
+   * @returns {Promise<{ status: number, body: any }>}
+   */
   const call = async (url, { method = 'GET', form, json, headers = {} } = {}) => {
+    /** @type {RequestInit & { headers: Record<string, string> }} */
     const init = { method, headers: { ...headers } };
     if (form) { init.body = new URLSearchParams(form).toString(); init.headers['Content-Type'] = 'application/x-www-form-urlencoded'; }
     if (json) { init.body = JSON.stringify(json); init.headers['Content-Type'] = 'application/json'; }
     const r = await fetch(url, init);
     const raw = await r.text();
+    /** @type {any} */
     let body = raw;
     try { body = JSON.parse(raw); } catch { /* text */ }
     return { status: r.status, body };
@@ -132,6 +140,7 @@ async function router(t, { games, env = {}, account } = {}) {
     adminRaw: (p, o) => call(adminBase + p, o),
     // Host a game the way every shipped client does: challenge, proof of work, POST /games.
     // `key` is the proof-of-work key the client ships (default: the router's ACCESS_KEY).
+    /** @param {Record<string, any>} [fields] @param {{ key?: string }} [opts] */
     async host(fields = {}, { key = ACCESS_KEY } = {}) {
       const challenge = (await call(base + '/challenge', { method: 'POST' })).body;
       const version = (await call(base + '/version' + (fields.game ? '?game=' + fields.game : ''))).body;
@@ -172,7 +181,7 @@ async function until(fn, ms = 3000, describe) {
 }
 
 // A router that is expected NOT to start: resolves with its exit code and log once it exits.
-function routerExit(t, { games, env = {} } = {}) {
+function routerExit(t, /** @type {{ games?: object, env?: object }} */ { games, env = {} } = {}) {
   const descriptors = {};
   for (const [id, d] of Object.entries(games || { stubgame: { default: true } })) {
     descriptors[id] = { version: 'v-test', bin: process.execPath, args: [STUB], serverDir: os.tmpdir(), ...d };

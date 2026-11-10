@@ -28,7 +28,7 @@ const server = net.createServer((socket) => {
   readline.createInterface({ input: socket }).on('line', (line) => process.stdout.write(line + '\n')).on('error', () => {});
 });
 server.listen(0, '127.0.0.1', () => {
-  process.stdout.write(JSON.stringify({ event: 'port', data: server.address().port }) + '\n');
+  process.stdout.write(JSON.stringify({ event: 'port', data: /** @type {net.AddressInfo} */ (server.address()).port }) + '\n');
 });
 
 const commandsIn = readline.createInterface({ input: process.stdin });

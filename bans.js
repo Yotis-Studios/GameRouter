@@ -50,6 +50,7 @@ class BanCache {
         signal: AbortSignal.timeout(5000)
       });
       if (!response.ok) throw new Error('status ' + response.status);
+      /** @type {any} */
       const body = await response.json();
       if (!Array.isArray(body.bans)) throw new Error('no ban list in the answer');
       this.bans = body.bans.filter((b) => b && Array.isArray(b.subs) && ['all', 'public_play', 'chat'].includes(b.scope));
