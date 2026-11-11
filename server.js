@@ -209,30 +209,31 @@ bans.onUpdate(() => {
 });
 
 // A PLAYER'S REPORT goes to the account service (POST /internal/reports), where staff triage it
-// (P5). Tried three times over about half a minute; whatever happens it stays in the admin API's
-// match details with `forwarded` saying whether it arrived. The account service treats the same
-// report twice as one, so a retry after a lost answer is harmless.
-async function forwardReport(report) {
-  report.forwarded = false;
+// (P5), and A MATCH'S RESULT (POST /internal/results), where it becomes YO XP. Each is tried
+// three times over about half a minute; whatever happens it stays in the admin API's match
+// details with `forwarded` saying whether it arrived. The account service counts the same report
+// or result twice as one, so a retry after a lost answer is harmless.
+async function forward(path, record, what) {
+  record.forwarded = false;
   if (!config.accountApi || !config.serviceKey) return;
-  const body = JSON.stringify(Object.assign({}, report, { router: config.routerName, forwarded: undefined }));
+  const body = JSON.stringify(Object.assign({}, record, { router: config.routerName, forwarded: undefined }));
   for (const wait of [0, 5000, 25000]) {
     if (wait) await new Promise((r) => setTimeout(r, wait).unref());
     try {
-      const response = await fetch(new URL('/internal/reports', config.accountApi), {
+      const response = await fetch(new URL(path, config.accountApi), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Service-Key': config.serviceKey },
         body,
         signal: AbortSignal.timeout(5000)
       });
       if (response.ok) {
-        report.forwarded = true;
+        record.forwarded = true;
         return;
       }
-      console.error(`The account service refused a report (${response.status})`);
+      console.error(`The account service refused ${what} (${response.status})`);
       if (response.status >= 400 && response.status < 500) return;
     } catch (err) {
-      console.error('Could not pass a report on: ' + err.message);
+      console.error(`Could not pass ${what} on: ` + err.message);
     }
   }
 }
@@ -248,7 +249,11 @@ function track(newGame) {
   if (newGame.code) codes[newGame.code] = newGame;
   allGames.push(newGame);
   newGame.on('join', (sub) => enforceBans(newGame, sub));
-  newGame.on('report', (report) => forwardReport(report));
+  newGame.on('report', (report) => forward('/internal/reports', report, 'a report'));
+  newGame.on('result', (result) => {
+    // Nobody verified, nothing to award.
+    if (result.players.length) forward('/internal/results', result, 'a match result');
+  });
   newGame.on('port', (port) => {
     games[port] = newGame;
     if (collectMetadata) db.run('INSERT INTO session (port, host, name, timestamp, ip) VALUES (?, ?, ?, ?, ?)', [port, newGame.host, newGame.name, newGame.timestamp, newGame.ip], function(err) {

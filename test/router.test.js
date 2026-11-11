@@ -250,6 +250,32 @@ test('A player report reaches the admin API with the lines the server kept', asy
   await until(async () => (await r.admin('/admin/matches/' + id)).body.reports[0].forwarded === true);
 });
 
+test("A match's result goes to the account service, its verified players only", async (t) => {
+  const account = await accountService(t);
+  const r = await router(t, { account });
+  const port = Number((await r.host()).body);
+  const game = await drive(t, port);
+  const id = (await r.call('/games')).body[0].id;
+  game.say('result', { players: [{ slot: 0, sub: 'g:1', game_xp: 250 }] });   // no match_ref: ignored
+  game.say('result', { game: 'stubgame', match_ref: 'start/7/1', humans: 2, players: [
+    { slot: 0, sub: 'g:1', human: true, game_xp: 250.9 },
+    { slot: 1, sub: 'u:5', human: true, game_xp: -3 },
+    { slot: 2, sub: null, human: false, game_xp: 400 }
+  ] });
+  game.say('result', { match_ref: 'start/7/2', humans: 0, players: [{ slot: 2, sub: null, game_xp: 400 }] });   // bots only: kept, not sent
+  await until(async () => (await r.admin('/admin/matches/' + id)).body.results.length === 2);
+  const [kept] = (await r.admin('/admin/matches/' + id)).body.results;
+  assert.equal(kept.match, id + ':start/7/1', "the router's match id prefixes the server's");
+  assert.deepEqual(kept.players, [{ sub: 'g:1', gameXp: 250 }, { sub: 'u:5', gameXp: 0 }], 'the bot left out, game XP whole and never negative');
+  await until(() => account.results.length === 1);
+  assert.deepEqual([account.results[0].router, account.results[0].game, account.results[0].match, account.results[0].humans],
+    ['main', 'stubgame', id + ':start/7/1', 2]);
+  assert.equal('forwarded' in account.results[0], false);
+  await until(async () => (await r.admin('/admin/matches/' + id)).body.results[0].forwarded === true);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(account.results.length, 1, 'a result with nobody verified is not sent');
+});
+
 test('Without the platform settings the router runs as before', async (t) => {
   const r = await router(t, { games: { sky: { quickplay: true } } });
   assert.ok(r.log.some((l) => l.includes('no player tokens (Quick Play off)')));

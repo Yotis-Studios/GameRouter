@@ -60,6 +60,13 @@ server verifies tokens with; `jwks` sends a new one) in its environment.
 player's report with the chat lines the server kept; the router keeps the last 50 per match in the
 admin API until the account service takes them (P5).
 
+`{"event":"result","data":{game, match_ref, humans, players: [{slot, sub, human, game_xp, stats}]}}`
+is a finished match's results (shikikan's `results` hook). The router keeps its verified players
+(`sub`; bots and unverified seats earn nothing) with whole, non-negative game XP, names the match
+`<its id>:<match_ref>`, shows the last 20 in the admin API, and forwards each with anyone in it to
+the account service's `/internal/results`, where it becomes YO XP (yo-account-api
+docs/PROGRESSION.md).
+
 ### Secrets
 
 Secrets are loaded from environment variables, never committed to the repo:

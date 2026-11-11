@@ -116,6 +116,9 @@ class Game extends EventEmitter {
     // Reports its players made (the server attaches the chat lines), newest last, until the
     // account service takes them (P5).
     this.reports = [];
+    // Its finished matches' results (shikikan's results hook), newest last, until the account
+    // service takes them as YO XP.
+    this.results = [];
     this.closing = false;
     // The directory this match runs in, the serverDir link resolved (see resolveRelease).
     this.release = resolveRelease(descriptor.serverDir);
@@ -277,6 +280,31 @@ class Game extends EventEmitter {
       return;
     }
 
+    // A finished match's results: each seat's game XP, by the sub the server verified (bots and
+    // unverified seats have none and earn nothing), and how many seats a person played.
+    // match_ref is the server's own id for the match; prefixed with this process's id it is
+    // unique across the router's lobbies, whose ids are reused.
+    if (event === 'result') {
+      const r = value && typeof value === 'object' ? value : null;
+      if (!r || !Array.isArray(r.players) || typeof r.match_ref !== 'string' || !r.match_ref) {
+        console.error(`(${this.port}): result without players or match_ref, ignored`);
+        return;
+      }
+      const result = {
+        game: this.game,
+        match: this.id + ':' + r.match_ref.slice(0, 100),
+        humans: Math.max(0, Math.floor(Number(r.humans) || 0)),
+        players: r.players.slice(0, 64).filter((p) => p && SUB.test(p.sub))
+          .map((p) => ({ sub: p.sub, gameXp: Math.max(0, Math.floor(Number(p.game_xp) || 0)) })),
+        at: new Date().toISOString()
+      };
+      this.results.push(result);
+      if (this.results.length > 20) this.results.shift();
+      console.log(`(${this.port}): match result, ${result.players.length} verified players of ${r.players.length}, ${result.humans} humans`);
+      this.emit('result', result);
+      return;
+    }
+
     const read = Object.prototype.hasOwnProperty.call(FIELDS, event) ? FIELDS[event] : null;
     const parsed = read ? read(value) : undefined;
     if (parsed === undefined) {
@@ -394,7 +422,8 @@ class Game extends EventEmitter {
       closing: this.closing,
       roster: [...this.roster].map(([sub, p]) => ({ sub, name: p.name, joined: new Date(p.joined).toISOString(), muted: this.muted.has(sub) })),
       reservations: [...this.reservations.values()].filter((r) => r.expires > now).map((r) => ({ sub: r.sub, expires: new Date(r.expires).toISOString() })),
-      reports: this.reports
+      reports: this.reports,
+      results: this.results
     });
   }
 
