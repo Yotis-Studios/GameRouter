@@ -48,6 +48,24 @@ const FIELDS = {
 // "b:" when the platform issues them; until then a game server reports only humans.
 const SUB = /^[ugb]:[1-9][0-9]{0,9}$/;
 
+// A player's stats from a match result, passed on for the game data service to read by the
+// game's own stat list (yo-game-api): at most 16 names, each a finite number, a boolean or a
+// short string. Anything else is left out.
+const STAT = /^[a-z][a-z0-9_]{0,31}$/;
+/** @param {any} stats */
+function cleanStats(stats) {
+  /** @type {Record<string, number | boolean | string>} */
+  const out = {};
+  if (!stats || typeof stats !== 'object' || Array.isArray(stats)) return out;
+  for (const [name, value] of Object.entries(stats).slice(0, 16)) {
+    if (!STAT.test(name)) continue;
+    if (typeof value === 'number' && Number.isFinite(value)) out[name] = value;
+    else if (typeof value === 'boolean') out[name] = value;
+    else if (typeof value === 'string') out[name] = value.slice(0, 32);
+  }
+  return out;
+}
+
 // How long a match gets to close itself after a close command before it is terminated, then
 // killed. CLOSE_GRACE_MS in the environment shortens it for tests.
 const CLOSE_GRACE_MS = Number(process.env.CLOSE_GRACE_MS) || 10000;
@@ -295,7 +313,7 @@ class Game extends EventEmitter {
         match: this.id + ':' + r.match_ref.slice(0, 100),
         humans: Math.max(0, Math.floor(Number(r.humans) || 0)),
         players: r.players.slice(0, 64).filter((p) => p && SUB.test(p.sub))
-          .map((p) => ({ sub: p.sub, gameXp: Math.max(0, Math.floor(Number(p.game_xp) || 0)) })),
+          .map((p) => ({ sub: p.sub, gameXp: Math.max(0, Math.floor(Number(p.game_xp) || 0)), stats: cleanStats(p.stats) })),
         at: new Date().toISOString()
       };
       this.results.push(result);
